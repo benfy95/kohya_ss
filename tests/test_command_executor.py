@@ -41,6 +41,41 @@ class TestDrainStreamToBuffer(unittest.TestCase):
         self.assertEqual(list(buf), ["c", "d"])
         self.assertEqual(dest.getvalue(), "a\nb\nc\nd\n")
 
+    def test_binary_stream_keeps_cr_and_colour_for_console(self):
+        """Progress-bar \\r and colour codes pass through to the console
+        untouched; the failure-tail buffer gets clean, split lines."""
+        import collections
+        import io
+
+        raw = "\x1b[34mINFO\x1b[0m 学習開始\n 10%|#\r 20%|##\r100%|###\ndone".encode()
+        stream = io.BufferedReader(io.BytesIO(raw))
+        buf = collections.deque(maxlen=10)
+        dest = io.StringIO()
+        ce.drain_stream_to_buffer(stream, buf, dest=dest, chunk_size=7)
+        self.assertEqual(dest.getvalue(), raw.decode())
+        self.assertEqual(
+            list(buf), ["INFO 学習開始", " 10%|#", " 20%|##", "100%|###", "done"]
+        )
+
+
+class TestConsoleEnvForChild(unittest.TestCase):
+    def test_tty_console_forces_colour_and_width(self):
+        import io
+
+        class FakeTTY(io.StringIO):
+            def isatty(self):
+                return True
+
+        env = ce.console_env_for_child({"COLUMNS": "200"}, console=FakeTTY())
+        self.assertEqual(env["FORCE_COLOR"], "1")
+        self.assertEqual(env["COLUMNS"], "200")  # user value kept
+
+    def test_non_tty_console_unchanged(self):
+        import io
+
+        env = {"A": "1"}
+        self.assertIs(ce.console_env_for_child(env, console=io.StringIO()), env)
+
 
 class TestReadLogTail(unittest.TestCase):
     def test_reads_last_lines_from_file(self):

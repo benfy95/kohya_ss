@@ -1,4 +1,8 @@
+import codecs
 import collections
+import os
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -13,6 +17,9 @@ from .custom_logging import setup_logging
 
 # Set up logging
 log = setup_logging()
+
+# Folder holding the sitecustomize.py auto-loaded by piped training processes.
+_CHILD_CONSOLE_DIR = os.path.join(os.path.dirname(__file__), "child_console")
 
 # How many trailing log lines to attach to a failure summary.
 _DEFAULT_LOG_TAIL_LINES = 40
@@ -37,26 +44,65 @@ def read_log_tail(path: str, max_lines: int = _DEFAULT_LOG_TAIL_LINES) -> str:
         return ""
 
 
+# CSI / OSC escape sequences (colours, cursor moves) emitted by rich / tqdm.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences so failure summaries stay readable."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
 def drain_stream_to_buffer(
-    stream: TextIO,
+    stream,
     buffer: Deque[str],
     *,
     dest: Optional[TextIO] = None,
+    chunk_size: int = 4096,
+    console_state: Optional[dict] = None,
 ) -> None:
-    """Read lines from ``stream`` into ``buffer``, optionally echoing to ``dest``.
+    """Copy ``stream`` to ``dest`` verbatim and keep its lines in ``buffer``.
 
     Used to tee subprocess output so a short failure tail is available without
-    hiding live console logs. Safe to call on a background thread.
+    hiding live console logs. Output is forwarded in chunks (not lines) so
+    carriage-return progress bars (tqdm) keep updating in place and colour
+    codes reach the console unchanged. ``stream`` may be binary (decoded as
+    UTF-8) or text. Lines in ``buffer`` are split on ``\\n``/``\\r`` and have
+    ANSI codes removed. Safe to call on a background thread.
+
+    ``console_state["mid_line"]`` records whether the console cursor was left
+    mid-line (e.g. an open progress bar), so the GUI can end that line before
+    logging its own messages.
     """
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    read = getattr(stream, "read1", None) or stream.read
+    pending = ""
+
+    def _keep(parts):
+        for part in parts:
+            part = strip_ansi(part).rstrip()
+            if part:
+                buffer.append(part)
+
     try:
-        for line in iter(stream.readline, ""):
-            if dest is not None:
+        while True:
+            chunk = read(chunk_size)
+            if not chunk:
+                break
+            text = decoder.decode(chunk) if isinstance(chunk, bytes) else chunk
+            if dest is not None and text:
                 try:
-                    dest.write(line)
+                    dest.write(text)
                     dest.flush()
-                except OSError:
+                except (OSError, ValueError):
                     pass
-            buffer.append(line.rstrip("\n\r"))
+                if console_state is not None:
+                    console_state["mid_line"] = not text.endswith("\n")
+            parts = re.split(r"\r\n|\r|\n", pending + text)
+            pending = parts.pop()
+            _keep(parts)
+        tail = decoder.decode(b"", final=True)
+        _keep([pending + tail])
     except (OSError, ValueError):
         # Stream closed underfoot (process exit) — ignore.
         pass
@@ -65,6 +111,44 @@ def drain_stream_to_buffer(
             stream.close()
         except OSError:
             pass
+
+
+def console_env_for_child(
+    env: Optional[dict], console: Optional[TextIO] = None
+) -> Optional[dict]:
+    """Tell a piped child process it is still printing to this console.
+
+    Piping the child's output (for the failure tail) makes rich see a non-TTY,
+    so it drops colours and wraps at 80 columns. When the GUI itself runs in a
+    real terminal, pass the terminal's width and force colour so the training
+    log looks like the GUI's own log. User-set values win (setdefault).
+    """
+    console = console if console is not None else sys.stdout
+    try:
+        is_tty = console.isatty()
+    except (AttributeError, ValueError, OSError):
+        is_tty = False
+    if not is_tty:
+        return env
+    env = dict(os.environ if env is None else env)
+    columns = shutil.get_terminal_size().columns
+    env.setdefault("FORCE_COLOR", "1")
+    env.setdefault("TTY_COMPATIBLE", "1")
+    env.setdefault("COLUMNS", str(columns))
+    # One-line tqdm bars spanning the window (one column spare so the bar
+    # never wraps, which would break its "\r" redraw).
+    env.setdefault("TQDM_NCOLS", str(max(columns - 1, 40)))
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    # A pipe makes stdout block-buffered: print()-ed messages such as
+    # "saving checkpoint: ..." would appear late (or be lost on Stop).
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    # child_console/sitecustomize.py: colour on Windows pipes, a timestamp on
+    # every log line, log lines never glued onto a progress bar.
+    env["KOHYA_CHILD_CONSOLE"] = "1"
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (_CHILD_CONSOLE_DIR, env.get("PYTHONPATH", "")) if p
+    )
+    return env
 
 
 def summarize_training_end(
@@ -109,6 +193,8 @@ class CommandExecutor:
             maxlen=_DEFAULT_LOG_TAIL_LINES
         )
         self._tee_thread: Optional[threading.Thread] = None
+        # Whether teed output left the console cursor mid-line (open bar).
+        self._console_state = {"mid_line": False}
 
         with gr.Row():
             self.button_run = gr.Button("Start training", variant="primary")
@@ -137,6 +223,7 @@ class CommandExecutor:
             self._stopped_by_user = False
             self._output_lines = collections.deque(maxlen=_DEFAULT_LOG_TAIL_LINES)
             self._tee_thread = None
+            self._console_state = {"mid_line": False}
 
             # Tee child stdout/stderr into a ring buffer (and the console) so
             # failure summaries can include a traceback tail. Skip if the
@@ -146,11 +233,11 @@ class CommandExecutor:
             if tee_output:
                 popen_kwargs["stdout"] = subprocess.PIPE
                 popen_kwargs["stderr"] = subprocess.STDOUT
-                popen_kwargs.setdefault("text", True)
-                popen_kwargs.setdefault("encoding", "utf-8")
-                popen_kwargs.setdefault("errors", "replace")
-                # Line-buffered text mode when supported.
-                popen_kwargs.setdefault("bufsize", 1)
+                # Binary pipe: drain_stream_to_buffer decodes UTF-8 itself and
+                # forwards "\r" untouched (text mode would turn every tqdm
+                # refresh into a new line).
+                popen_kwargs["bufsize"] = 0
+                popen_kwargs["env"] = console_env_for_child(popen_kwargs.get("env"))
 
             # Execute the command securely
             self.process = subprocess.Popen(run_cmd, **popen_kwargs)
@@ -160,7 +247,10 @@ class CommandExecutor:
                 self._tee_thread = threading.Thread(
                     target=drain_stream_to_buffer,
                     args=(self.process.stdout, self._output_lines),
-                    kwargs={"dest": sys.stdout},
+                    kwargs={
+                        "dest": sys.stdout,
+                        "console_state": self._console_state,
+                    },
                     name="command-executor-tee",
                     daemon=True,
                 )
@@ -178,6 +268,8 @@ class CommandExecutor:
                     child.kill()
                 parent.kill()
                 self._stopped_by_user = True
+                self._join_tee(timeout=1.0)
+                self._end_console_line()
                 log.info("The running process has been terminated.")
             except psutil.NoSuchProcess:
                 # Explicitly handle the case where the process does not exist
@@ -192,6 +284,17 @@ class CommandExecutor:
             log.info("There is no running process to kill.")
 
         return gr.Button(visible=True), gr.Button(visible=False or self.headless)
+
+    def _end_console_line(self) -> None:
+        """Finish a line the child left open (e.g. a progress bar) so the
+        GUI's next log message starts on its own line."""
+        if self._console_state.get("mid_line"):
+            try:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+            self._console_state["mid_line"] = False
 
     def _join_tee(self, timeout: float = 2.0) -> None:
         thread = self._tee_thread
@@ -210,6 +313,9 @@ class CommandExecutor:
         while self.is_running():
             time.sleep(1)
             log.debug("Waiting for training to end...")
+
+        self._join_tee()
+        self._end_console_line()
 
         returncode: Optional[int] = None
         if self.process is not None:
