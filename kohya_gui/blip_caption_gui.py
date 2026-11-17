@@ -2,7 +2,13 @@ import gradio as gr
 import subprocess
 import os
 import sys
-from .common_gui import get_folder_path, add_pre_postfix, scriptdir, list_dirs, setup_environment
+from .common_gui import (
+    get_folder_path,
+    add_pre_postfix,
+    scriptdir,
+    list_dirs,
+    setup_environment,
+)
 from .custom_logging import setup_logging
 
 # Set up logging
@@ -55,8 +61,10 @@ def caption_images(
 
     log.info(f"Captioning files in {train_data_dir}...")
 
-    # Construct the command to run make_captions.py
-    run_cmd = [rf"{PYTHON}", rf"{scriptdir}/sd-scripts/finetune/make_captions.py"]
+    # tools/blip_caption.py uses transformers' own BLIP: sd-scripts'
+    # finetune/make_captions.py bundles legacy BLIP code that does not run on
+    # transformers 5 (see that tool's docstring).
+    run_cmd = [rf"{PYTHON}", rf"{scriptdir}/tools/blip_caption.py"]
 
     # Add required arguments
     run_cmd.append("--batch_size")
@@ -80,12 +88,6 @@ def caption_images(
     # Add the directory containing the training data
     run_cmd.append(rf"{train_data_dir}")
 
-    # Add URL for caption model weights
-    run_cmd.append("--caption_weights")
-    run_cmd.append(
-        rf"https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large_caption.pth"
-    )
-
     # Set up the environment
     env = setup_environment()
 
@@ -93,8 +95,10 @@ def caption_images(
     command_to_run = " ".join(run_cmd)
     log.info(f"Executing command: {command_to_run}")
 
-    # Run the command in the sd-scripts folder context
-    subprocess.run(run_cmd, env=env, shell=False, cwd=rf"{scriptdir}/sd-scripts")
+    result = subprocess.run(run_cmd, env=env, shell=False, cwd=rf"{scriptdir}")
+    if result.returncode != 0:
+        log.error(f"BLIP captioning failed with exit code {result.returncode}.")
+        return
 
     # Add prefix and postfix
     add_pre_postfix(
