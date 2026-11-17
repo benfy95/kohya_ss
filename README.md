@@ -5,6 +5,11 @@
 [![License](https://img.shields.io/github/license/bmaltais/kohya_ss)](LICENSE.md)
 [![GitHub issues](https://img.shields.io/github/issues/bmaltais/kohya_ss)](https://github.com/bmaltais/kohya_ss/issues)
 
+> **This is a community build of [bmaltais/kohya_ss](https://github.com/bmaltais/kohya_ss)** that runs on the latest
+> [kohya-ss/sd-scripts](https://github.com/kohya-ss/sd-scripts) backend (**v0.12.3**) and adds
+> **[MOSS-Image](https://github.com/OpenMOSS/MOSS-Image) LoRA training** to the GUI.
+> See [About this build](#about-this-build) for what changed and how to install it.
+
 This is a GUI and CLI for training diffusion models.
 
 This project provides a user-friendly Gradio-based Graphical User Interface (GUI) for [Kohya's Stable Diffusion training scripts](https://github.com/kohya-ss/sd-scripts). 
@@ -15,13 +20,126 @@ Key features of this GUI include:
 *   Easy-to-use interface for setting a wide range of training parameters.
 *   Automatic generation of the command-line interface (CLI) commands required to run the training scripts.
 *   Support for LoRA, LoHa, LoKr, Dreambooth, fine-tuning, and Textual Inversion training.
-*   Support for a wide range of base models: Stable Diffusion 1.5/2.x, SDXL, SD3, Flux.1, Lumina Image 2.0, Anima, and HunyuanImage-2.1.
+*   Support for a wide range of base models: Stable Diffusion 1.5/2.x, SDXL, SD3, Flux.1, Lumina Image 2.0, Anima, HunyuanImage-2.1, and **MOSS-Image** (LoRA).
 *   LECO (concept erasure/editing) training.
 
 Support for Linux and macOS is also available. While Linux support is actively maintained through community contributions, macOS compatibility may vary.
 
+## About this build
+
+This build keeps everything from the original GUI and updates it to the newest training backend, so the latest
+models supported by sd-scripts can be trained from the GUI.
+
+### What's new
+
+- **Backend: sd-scripts v0.12.3** (from v0.11.1), with dependencies aligned to it: `transformers` 5.17.0,
+  `diffusers` 0.40.0, `huggingface-hub` 1.32.0, `safetensors` 0.8.0, `accelerate` ≥ 1.15.0.
+- **MOSS-Image LoRA training** on the LoRA tab (details below).
+- **Readable training console:** colours, one-line full-width progress bars, a timestamp on every log line, and
+  "saving checkpoint: …" messages shown as each epoch is saved.
+- **BLIP captioning fixed for transformers 5:** the BLIP tab now uses transformers' own BLIP-large captioning model
+  (`Salesforce/blip-image-captioning-large`) instead of sd-scripts' legacy BLIP code, which no longer runs.
+- All existing model types (SD 1.5/2.x, SDXL, SD3, Flux.1, Lumina, Anima, HunyuanImage-2.1) were re-checked
+  against the new backend.
+
+### ⭐ MOSS-Image
+
+[MOSS-Image](https://github.com/OpenMOSS/MOSS-Image) (OpenMOSS) is a 5B single-stream DiT that uses
+**Qwen3.5-9B** as its text encoder and the **FLUX.2 VAE**. LoRAs trained here load in ComfyUI without conversion.
+
+**How to train one:**
+1. **LoRA tab → Model:** set *Pretrained model* to the MOSS-Image DiT: either the first shard
+   `diffusion_pytorch_model-00001-of-00003.safetensors` from
+   [OpenMOSS-Team/MOSS-Image-Base](https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base), or a ComfyUI single file
+   such as `moss_image_base_bf16.safetensors` / `moss_image_base_int8_convrot.safetensors`.
+2. Tick the **MOSS-Image** checkbox, and set **LoRA type** to **MOSS-Image** (`networks.lora_generic`).
+   Kohya LoHa / LoKr also work.
+3. In the **MOSS-Image** panel, set the **Qwen3.5-9B text encoder** (`model-00001-of-00004.safetensors`, or the
+   ComfyUI `qwen3.5_9b_int8_convrot.safetensors`) and the **FLUX.2 VAE** (`flux2-vae.safetensors`).
+4. Use **bf16** mixed precision and gradient checkpointing, and keep **Cache Text Encoder Outputs** on.
+   Turn **Shuffle caption** off: it can't be combined with cached text encoder outputs (the GUI tells you).
+
+**Included options:**
+- Timestep sampling preset that reproduces MOSS-Image's pre-training schedule (`truncated_logit_normal`).
+- **ConvRot INT8** for the DiT and/or the text encoder (roughly halves weight VRAM; replaces fp8). Pre-quantized
+  ComfyUI `*_int8_convrot` files are detected automatically.
+- Block swap (up to 40 blocks) with the faster **H2D-only** mode, Unsloth activation offloading, and `torch.compile`.
+- Multi-line captions, text-embedder LoRA, and cached text encoder outputs.
+- The tokenizer (~20 MB) is downloaded once, then reused from the local cache.
+
+**Rough VRAM guide** (from the [sd-scripts documentation](https://github.com/kohya-ss/sd-scripts/blob/main/docs/moss_image_train_network.md),
+1024px, batch 1):
+
+| GPU   | Suggested setup |
+|-------|-----------------|
+| 24 GB | bf16 DiT, text encoder outputs cached (INT8 text encoder if loading runs out of memory) |
+| 16 GB | ConvRot INT8 for both the DiT and the text encoder |
+| 12 GB | ConvRot INT8 for both + Blocks to swap 20–36 (needs ~15 GB system RAM) |
+
+> **Tip (Windows):** install [`triton-windows`](https://github.com/woct0rdho/triton-windows) matching your PyTorch
+> version for fast INT8 kernels. Without it, INT8 still saves memory but runs slower.
+
+### Install this build
+
+Requirements are the same as the original: **Python 3.10 or 3.11**, Git, and an NVIDIA GPU with a recent driver.
+Always clone with `--recursive` so the matching sd-scripts version is downloaded too.
+
+**Windows (uv, recommended)**
+
+```powershell
+git clone --recursive https://github.com/benfy95/kohya_ss.git
+cd kohya_ss
+.\gui-uv.bat
+```
+
+**Windows (pip)**
+
+```powershell
+git clone --recursive https://github.com/benfy95/kohya_ss.git
+cd kohya_ss
+.\setup.bat
+.\gui.bat
+```
+
+**Linux**
+
+```bash
+git clone --recursive https://github.com/benfy95/kohya_ss.git
+cd kohya_ss
+./gui-uv.sh        # or: ./setup.sh && ./gui.sh
+```
+
+The detailed guides under [Installation Options](#installation-options) apply unchanged. Just use this repository's
+URL in the `git clone` step.
+
+**Updating an existing install of this build**
+
+```bash
+git pull
+git submodule update --init --recursive
+```
+
+Then start it again with `gui-uv.bat` (it syncs dependencies automatically), or re-run `setup.bat` for the pip
+install.
+
+> If you are switching an existing *original* kohya_ss install to this build, re-run the installer: the backend
+> needs the newer `transformers` 5 / `diffusers` 0.40 packages.
+
+### Contributors
+
+- **[benfy95](https://github.com/benfy95)**: maintainer of this build, testing and MOSS-Image training validation
+- **Claude (Anthropic), via Claude Code**: implementation of the backend update, MOSS-Image GUI support and fixes
+
+All credit for the GUI goes to [bmaltais](https://github.com/bmaltais/kohya_ss) and its contributors, and for the
+training scripts to [kohya-ss](https://github.com/kohya-ss/sd-scripts).
+
 ## Table of Contents
 
+- [About this build](#about-this-build)
+  - [What's new](#whats-new)
+  - [MOSS-Image](#-moss-image)
+  - [Install this build](#install-this-build)
+  - [Contributors](#contributors)
 - [Installation Options](#installation-options)
   - [Local Installation Overview](#local-installation-overview)
     - [`uv` vs `pip` – What's the Difference?](#uv-vs-pip--whats-the-difference)
@@ -338,6 +456,22 @@ This project is licensed under the Apache License 2.0. See the [LICENSE.md](LICE
 ## Change History
 
 Only the upcoming release is detailed here. For the full history of published releases, see [GitHub Releases](https://github.com/bmaltais/kohya_ss/releases).
+
+### benfy95 build (2026-11-17)
+
+**Added**
+- MOSS-Image LoRA training (sd-scripts `moss_image_train_network.py`, `networks.lora_generic`), including ConvRot
+  INT8, H2D-only block swap and Kohya LoHa/LoKr support.
+
+**Changed**
+- sd-scripts backend v0.11.1 → v0.12.3; `transformers` 5.17.0, `diffusers` 0.40.0, `huggingface-hub` 1.32.0,
+  `safetensors` 0.8.0, `schedulefree` 1.4.1, `accelerate` ≥ 1.15.0.
+- BLIP captioning now uses transformers' BLIP-large model (`tools/blip_caption.py`).
+
+**Fixed**
+- Training console output: colours, full-width one-line progress bars, timestamps on every line, visible
+  checkpoint-save messages, and stop/end messages on their own line.
+- Repeated Starlette `HTTP_422_UNPROCESSABLE_ENTITY` deprecation warning from Gradio is filtered.
 
 ### v26.0.0
 
