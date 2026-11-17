@@ -159,6 +159,24 @@ def should_recommend_headless(
     return False
 
 
+# Third-party deprecation warnings that fire on every request and that the GUI
+# cannot fix itself. gradio 6.17.x still references starlette's renamed
+# HTTP_422_UNPROCESSABLE_ENTITY constant in routes.py, so starlette >= 1.x warns
+# on every queue join. StarletteDeprecationWarning subclasses UserWarning, so
+# match by message to avoid importing starlette before gradio does.
+KNOWN_NOISY_DEPENDENCY_WARNINGS = (
+    (UserWarning, r".*'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated"),
+)
+
+
+def suppress_known_dependency_warnings() -> None:
+    """Silence the repeated, harmless dependency warnings listed above."""
+    import warnings
+
+    for category, message in KNOWN_NOISY_DEPENDENCY_WARNINGS:
+        warnings.filterwarnings("ignore", message=message, category=category)
+
+
 HEADLESS_RECOMMENDATION_MESSAGE = (
     "No interactive display detected (or SSH session). "
     "Native dialogs (easygui/tkinter) can block the process. "
@@ -1042,7 +1060,7 @@ def set_pretrained_model_name_or_path_input(
     Returns:
         tuple: A tuple containing the Dropdown widget, v2 checkbox, v_parameterization checkbox,
                sdxl checkbox, sd3 checkbox, flux1 checkbox, hunyuan_image checkbox, anima
-               checkbox, and lumina checkbox.
+               checkbox, lumina checkbox, and moss_image checkbox.
     """
     # Check if the given pretrained_model_name_or_path is in the list of SDXL models
     if pretrained_model_name_or_path in SDXL_MODELS:
@@ -1055,6 +1073,7 @@ def set_pretrained_model_name_or_path_input(
         hunyuan_image = gr.Checkbox(value=False, visible=False)
         anima = gr.Checkbox(value=False, visible=False)
         lumina = gr.Checkbox(value=False, visible=False)
+        moss_image = gr.Checkbox(value=False, visible=False)
         return (
             gr.Dropdown(),
             v2,
@@ -1065,6 +1084,7 @@ def set_pretrained_model_name_or_path_input(
             hunyuan_image,
             anima,
             lumina,
+            moss_image,
         )
 
     # Check if the given pretrained_model_name_or_path is in the list of V2 base models
@@ -1078,6 +1098,7 @@ def set_pretrained_model_name_or_path_input(
         hunyuan_image = gr.Checkbox(value=False, visible=False)
         anima = gr.Checkbox(value=False, visible=False)
         lumina = gr.Checkbox(value=False, visible=False)
+        moss_image = gr.Checkbox(value=False, visible=False)
         return (
             gr.Dropdown(),
             v2,
@@ -1088,6 +1109,7 @@ def set_pretrained_model_name_or_path_input(
             hunyuan_image,
             anima,
             lumina,
+            moss_image,
         )
 
     # Check if the given pretrained_model_name_or_path is in the list of V parameterization models
@@ -1103,6 +1125,7 @@ def set_pretrained_model_name_or_path_input(
         hunyuan_image = gr.Checkbox(value=False, visible=False)
         anima = gr.Checkbox(value=False, visible=False)
         lumina = gr.Checkbox(value=False, visible=False)
+        moss_image = gr.Checkbox(value=False, visible=False)
         return (
             gr.Dropdown(),
             v2,
@@ -1113,6 +1136,7 @@ def set_pretrained_model_name_or_path_input(
             hunyuan_image,
             anima,
             lumina,
+            moss_image,
         )
 
     # Check if the given pretrained_model_name_or_path is in the list of V1 models
@@ -1126,6 +1150,7 @@ def set_pretrained_model_name_or_path_input(
         hunyuan_image = gr.Checkbox(value=False, visible=False)
         anima = gr.Checkbox(value=False, visible=False)
         lumina = gr.Checkbox(value=False, visible=False)
+        moss_image = gr.Checkbox(value=False, visible=False)
         return (
             gr.Dropdown(),
             v2,
@@ -1136,6 +1161,7 @@ def set_pretrained_model_name_or_path_input(
             hunyuan_image,
             anima,
             lumina,
+            moss_image,
         )
 
     # Check if the model_list is set to 'custom'
@@ -1147,6 +1173,7 @@ def set_pretrained_model_name_or_path_input(
     hunyuan_image = gr.Checkbox(visible=True)
     anima = gr.Checkbox(visible=True)
     lumina = gr.Checkbox(visible=True)
+    moss_image = gr.Checkbox(visible=True)
 
     # Auto-detect model type if safetensors file path is given
     if pretrained_model_name_or_path.lower().endswith(".safetensors"):
@@ -1174,6 +1201,7 @@ def set_pretrained_model_name_or_path_input(
         hunyuan_image,
         anima,
         lumina,
+        moss_image,
     )
 
 

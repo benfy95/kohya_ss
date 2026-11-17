@@ -52,6 +52,11 @@ from .class_flux1 import flux1Training
 from .class_hunyuan_image import hunyuanImageTraining
 from .class_anima import animaTraining
 from .class_lumina import luminaTraining
+from .class_moss_image import (
+    mossImageTraining,
+    MOSS_MAX_BLOCKS_TO_SWAP,
+    resolve_moss_tokenizer_dir,
+)
 
 from .dreambooth_folder_creation_gui import (
     gradio_dreambooth_folder_creation_tab,
@@ -403,6 +408,32 @@ def save_configuration(
     lumina_use_flash_attn,
     lumina_use_sage_attn,
     lumina_checkbox,
+    # MOSS-Image parameters
+    moss_text_encoder,
+    moss_vae,
+    moss_tokenizer_cache_dir,
+    moss_max_token_length,
+    moss_timestep_sampling,
+    moss_discrete_flow_shift,
+    moss_sigmoid_scale,
+    moss_logit_mean,
+    moss_logit_std,
+    moss_timestep_cutoff,
+    moss_timestep_uniform_ratio,
+    moss_attn_mode,
+    moss_split_attn,
+    moss_sample_uncond_skip_layers,
+    moss_convrot_int8,
+    moss_convrot_int8_text_encoder,
+    moss_convrot_int8_bwd,
+    moss_block_swap_h2d_only,
+    moss_unsloth_offload_checkpointing,
+    moss_compile,
+    moss_enable_multiline_caption,
+    moss_train_text_embedder,
+    moss_cache_text_encoder_outputs,
+    moss_cache_text_encoder_outputs_to_disk,
+    moss_image_checkbox,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -750,6 +781,32 @@ def open_configuration(
     lumina_use_flash_attn,
     lumina_use_sage_attn,
     lumina_checkbox,
+    # MOSS-Image parameters
+    moss_text_encoder,
+    moss_vae,
+    moss_tokenizer_cache_dir,
+    moss_max_token_length,
+    moss_timestep_sampling,
+    moss_discrete_flow_shift,
+    moss_sigmoid_scale,
+    moss_logit_mean,
+    moss_logit_std,
+    moss_timestep_cutoff,
+    moss_timestep_uniform_ratio,
+    moss_attn_mode,
+    moss_split_attn,
+    moss_sample_uncond_skip_layers,
+    moss_convrot_int8,
+    moss_convrot_int8_text_encoder,
+    moss_convrot_int8_bwd,
+    moss_block_swap_h2d_only,
+    moss_unsloth_offload_checkpointing,
+    moss_compile,
+    moss_enable_multiline_caption,
+    moss_train_text_embedder,
+    moss_cache_text_encoder_outputs,
+    moss_cache_text_encoder_outputs_to_disk,
+    moss_image_checkbox,
     ##
     training_preset,
 ):
@@ -973,6 +1030,7 @@ MODERN_NATIVE_LORA_REGULARIZER_TYPES = frozenset(
         "Anima",
         "Lumina",
         "HunyuanImage-2.1",
+        "MOSS-Image",
     }
 )
 
@@ -1091,6 +1149,86 @@ def append_rank_module_dropout_network_args(
     if module_dropout is not None and float(module_dropout) > 0:
         network_args += f" module_dropout={module_dropout}"
     return network_args
+
+
+def validate_moss_image_settings(
+    *,
+    text_encoder,
+    vae,
+    bucket_reso_steps,
+    blocks_to_swap,
+    unsloth_offload_checkpointing,
+    cpu_offload_checkpointing,
+    block_swap_h2d_only,
+    gradient_checkpointing,
+    attn_mode,
+    split_attn,
+    compile,
+    mixed_precision,
+    cache_text_encoder_outputs=False,
+    shuffle_caption=False,
+) -> bool:
+    """GUI-side mirror of moss_image_train_network.py's startup asserts.
+
+    Fails fast in the GUI instead of after the 26GB of model weights load.
+    Returns False (after logging) when the combination cannot run.
+    """
+    if cache_text_encoder_outputs and shuffle_caption:
+        # sd-scripts DatasetGroup.is_text_encoder_output_cacheable(): cached
+        # outputs encode one fixed caption, so per-step shuffling is impossible.
+        log.error(
+            "MOSS-Image: 'Shuffle caption' cannot be used with Cache Text Encoder "
+            "Outputs. Turn off Shuffle caption (recommended for MOSS-Image's "
+            "natural-language captions) or turn off the text encoder cache."
+        )
+        return False
+    if not text_encoder:
+        log.error("MOSS-Image requires the Qwen3.5-9B text encoder path.")
+        return False
+    if not vae:
+        log.error("MOSS-Image requires the FLUX.2 VAE path.")
+        return False
+    try:
+        reso_steps = int(bucket_reso_steps)
+    except (TypeError, ValueError):
+        reso_steps = 0
+    if reso_steps <= 0 or reso_steps % 16 != 0:
+        log.error(
+            "MOSS-Image requires bucket resolution steps to be a multiple of 16 "
+            f"(got {bucket_reso_steps})."
+        )
+        return False
+    swap = int(blocks_to_swap or 0)
+    if swap > MOSS_MAX_BLOCKS_TO_SWAP:
+        log.error(
+            f"MOSS-Image supports at most {MOSS_MAX_BLOCKS_TO_SWAP} blocks to swap "
+            f"(got {swap})."
+        )
+        return False
+    if swap > 0 and (unsloth_offload_checkpointing or cpu_offload_checkpointing):
+        log.error(
+            "Blocks to swap cannot be combined with Unsloth or CPU offload "
+            "checkpointing for MOSS-Image."
+        )
+        return False
+    if unsloth_offload_checkpointing and cpu_offload_checkpointing:
+        log.error(
+            "Unsloth offload checkpointing and CPU offload checkpointing "
+            "cannot both be enabled."
+        )
+        return False
+    if block_swap_h2d_only and swap > 0 and not gradient_checkpointing:
+        log.error("H2D-only block swap requires gradient checkpointing.")
+        return False
+    if attn_mode == "xformers" and not split_attn:
+        log.error("MOSS-Image attention mode 'xformers' requires Split Attention.")
+        return False
+    if mixed_precision == "fp16":
+        log.warning(
+            "mixed_precision fp16 is not recommended for MOSS-Image (bf16 models); "
+            "use bf16."
+        )
+    return True
 
 
 def build_native_loha_lokr_network_args(
@@ -1433,6 +1571,32 @@ def train_model(
     lumina_use_flash_attn,
     lumina_use_sage_attn,
     lumina_checkbox,
+    # MOSS-Image parameters
+    moss_text_encoder,
+    moss_vae,
+    moss_tokenizer_cache_dir,
+    moss_max_token_length,
+    moss_timestep_sampling,
+    moss_discrete_flow_shift,
+    moss_sigmoid_scale,
+    moss_logit_mean,
+    moss_logit_std,
+    moss_timestep_cutoff,
+    moss_timestep_uniform_ratio,
+    moss_attn_mode,
+    moss_split_attn,
+    moss_sample_uncond_skip_layers,
+    moss_convrot_int8,
+    moss_convrot_int8_text_encoder,
+    moss_convrot_int8_bwd,
+    moss_block_swap_h2d_only,
+    moss_unsloth_offload_checkpointing,
+    moss_compile,
+    moss_enable_multiline_caption,
+    moss_train_text_embedder,
+    moss_cache_text_encoder_outputs,
+    moss_cache_text_encoder_outputs_to_disk,
+    moss_image_checkbox,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -1500,11 +1664,50 @@ def train_model(
         )
         return TRAIN_BUTTON_VISIBLE
 
-    # Native LoHa/LoKr only support SDXL and Anima (see sd-scripts/docs/loha_lokr.md).
+    # MOSS-Image trains networks.lora_generic (LoRA type "MOSS-Image") or the
+    # native LoHa/LoKr modules, which auto-detect the MossImageBlock layout.
+    moss_image_compatible_types = {"MOSS-Image"} | KOHYA_LOHA_LOKR_TYPES
+    if moss_image_checkbox and LoRA_type not in moss_image_compatible_types:
+        log.error(
+            "LoRA type must be set to 'MOSS-Image', 'Kohya LoHa', or 'Kohya LoKr' "
+            "if the MOSS-Image model checkbox is checked."
+        )
+        return TRAIN_BUTTON_VISIBLE
+
+    if LoRA_type == "MOSS-Image" and not moss_image_checkbox:
+        log.error(
+            "The MOSS-Image model checkbox must be checked when LoRA type is set to 'MOSS-Image'."
+        )
+        return TRAIN_BUTTON_VISIBLE
+
+    if moss_image_checkbox:
+        if not validate_moss_image_settings(
+            text_encoder=moss_text_encoder,
+            vae=moss_vae,
+            bucket_reso_steps=bucket_reso_steps,
+            blocks_to_swap=blocks_to_swap,
+            unsloth_offload_checkpointing=moss_unsloth_offload_checkpointing,
+            cpu_offload_checkpointing=cpu_offload_checkpointing,
+            block_swap_h2d_only=moss_block_swap_h2d_only,
+            gradient_checkpointing=gradient_checkpointing,
+            attn_mode=moss_attn_mode,
+            split_attn=moss_split_attn,
+            compile=moss_compile,
+            mixed_precision=mixed_precision,
+            cache_text_encoder_outputs=(
+                moss_cache_text_encoder_outputs
+                or moss_cache_text_encoder_outputs_to_disk
+            ),
+            shuffle_caption=shuffle_caption,
+        ):
+            return TRAIN_BUTTON_VISIBLE
+
+    # Native LoHa/LoKr only support SDXL, Anima and MOSS-Image (see
+    # sd-scripts/docs/loha_lokr.md and docs/moss_image_train_network.md).
     if LoRA_type in KOHYA_LOHA_LOKR_TYPES:
-        if not (sdxl or anima_checkbox):
+        if not (sdxl or anima_checkbox or moss_image_checkbox):
             log.error(
-                f"{LoRA_type} requires SDXL or Anima. Enable the SDXL or Anima "
+                f"{LoRA_type} requires SDXL, Anima or MOSS-Image. Enable the matching "
                 "model checkbox (native networks.loha / networks.lokr only "
                 "auto-detect those architectures)."
             )
@@ -1788,6 +1991,8 @@ def train_model(
         run_cmd.append(rf"{scriptdir}/sd-scripts/anima_train_network.py")
     elif lumina_checkbox:
         run_cmd.append(rf"{scriptdir}/sd-scripts/lumina_train_network.py")
+    elif moss_image_checkbox:
+        run_cmd.append(rf"{scriptdir}/sd-scripts/moss_image_train_network.py")
     else:
         run_cmd.append(rf"{scriptdir}/sd-scripts/train_network.py")
 
@@ -1798,6 +2003,7 @@ def train_model(
         or hunyuan_image_checkbox
         or anima_checkbox
         or lumina_checkbox
+        or moss_image_checkbox
     )
     if train_inpainting:
         # Masks are generated randomly per training step from the source
@@ -1945,6 +2151,12 @@ def train_model(
             network_args, rank_dropout, module_dropout
         )
 
+    if LoRA_type == "MOSS-Image":
+        network_module = "networks.lora_generic"
+        network_args = append_rank_module_dropout_network_args(
+            network_args, rank_dropout, module_dropout
+        )
+
     # Native sd-scripts LoHa/LoKr (not lycoris.kohya). Targets/excludes are
     # auto-detected from the loaded model; optional conv/factor args only.
     if LoRA_type == "Kohya LoHa":
@@ -1970,6 +2182,13 @@ def train_model(
             rank_dropout=rank_dropout,
             module_dropout=module_dropout,
         )
+
+    if (
+        moss_image_checkbox
+        and moss_train_text_embedder
+        and LoRA_type in ({"MOSS-Image"} | KOHYA_LOHA_LOKR_TYPES)
+    ):
+        network_args += " train_text_embedder=True"
 
     if LoRA_type in ["Kohya LoCon", "Standard"]:
         kohya_lora_var_list = [
@@ -2110,7 +2329,14 @@ def train_model(
         resolve_network_train_flags(
             text_encoder_lr_float,
             unet_lr_float,
-            force_unet_only=bool(hunyuan_image_checkbox),
+            force_unet_only=bool(hunyuan_image_checkbox)
+            or bool(
+                moss_image_checkbox
+                and (
+                    moss_cache_text_encoder_outputs
+                    or moss_cache_text_encoder_outputs_to_disk
+                )
+            ),
         )
     )
     log.info(
@@ -2141,7 +2367,13 @@ def train_model(
         disable_mmap_load_safetensors_value = sd3_disable_mmap_load_safetensors
 
     vae_value = (
-        anima_vae if anima_checkbox else hunyuan_vae if hunyuan_image_checkbox else vae
+        moss_vae
+        if moss_image_checkbox
+        else (
+            anima_vae
+            if anima_checkbox
+            else hunyuan_vae if hunyuan_image_checkbox else vae
+        )
     )
 
     config_toml_data = {
@@ -2163,6 +2395,7 @@ def train_model(
             or (hunyuan_image_checkbox and hunyuan_image_cache_text_encoder_outputs)
             or (anima_checkbox and anima_cache_text_encoder_outputs)
             or (lumina_checkbox and lumina_cache_text_encoder_outputs)
+            or (moss_image_checkbox and moss_cache_text_encoder_outputs)
             else None
         ),
         "cache_text_encoder_outputs_to_disk": (
@@ -2177,6 +2410,8 @@ def train_model(
             and anima_cache_text_encoder_outputs_to_disk
             or lumina_checkbox
             and lumina_cache_text_encoder_outputs_to_disk
+            or moss_image_checkbox
+            and moss_cache_text_encoder_outputs_to_disk
             else None
         ),
         "caption_dropout_every_n_epochs": int(caption_dropout_every_n_epochs),
@@ -2189,6 +2424,7 @@ def train_model(
             and not hunyuan_image_checkbox
             and not anima_checkbox
             and not lumina_checkbox
+            and not moss_image_checkbox
             else None
         ),
         "color_aug": color_aug,
@@ -2200,7 +2436,8 @@ def train_model(
         "enable_bucket": enable_bucket,
         "epoch": int(epoch),
         "flip_aug": flip_aug,
-        "fp8_base": fp8_base,
+        # MOSS-Image has no fp8 path; ConvRot INT8 replaces it.
+        "fp8_base": fp8_base if not moss_image_checkbox else None,
         "fp8_base_unet": fp8_base_unet if flux1_checkbox else None,
         "full_bf16": full_bf16,
         "full_fp16": full_fp16,
@@ -2247,6 +2484,7 @@ def train_model(
             and not hunyuan_image_checkbox
             and not anima_checkbox
             and not lumina_checkbox
+            and not moss_image_checkbox
             else None
         ),
         "max_train_epochs": (
@@ -2332,7 +2570,8 @@ def train_model(
         "save_state_to_huggingface": save_state_to_huggingface,
         "scale_v_pred_loss_like_noise_pred": scale_v_pred_loss_like_noise_pred,
         "scale_weight_norms": scale_weight_norms,
-        "sdpa": True if xformers == "sdpa" else None,
+        # MOSS-Image selects attention via attn_mode (which overrides these).
+        "sdpa": True if xformers == "sdpa" and not moss_image_checkbox else None,
         "seed": int(seed) if int(seed) != 0 else None,
         "shuffle_caption": shuffle_caption,
         "skip_cache_check": skip_cache_check,
@@ -2346,15 +2585,17 @@ def train_model(
         "training_comment": training_comment,
         "unet_lr": unet_lr_float if unet_lr_float != 0.0 else None,
         "log_with": log_with,
-        "v2": v2 if not hunyuan_image_checkbox else None,
-        "v_parameterization": v_parameterization,
+        "v2": v2 if not (hunyuan_image_checkbox or moss_image_checkbox) else None,
+        "v_parameterization": (v_parameterization if not moss_image_checkbox else None),
         "v_pred_like_loss": v_pred_like_loss if v_pred_like_loss != 0 else None,
         "vae": vae_value,
         "vae_batch_size": vae_batch_size if vae_batch_size != 0 else None,
         "wandb_api_key": wandb_api_key,
         "wandb_run_name": wandb_run_name if wandb_run_name != "" else output_name,
         "weighted_captions": weighted_captions,
-        "xformers": True if xformers == "xformers" else None,
+        "xformers": (
+            True if xformers == "xformers" and not moss_image_checkbox else None
+        ),
         # SD3 only Parameters
         # "cache_text_encoder_outputs": see previous assignment above for code
         # "cache_text_encoder_outputs_to_disk": see previous assignment above for code
@@ -2365,8 +2606,16 @@ def train_model(
         "enable_scaled_pos_embed": (
             sd3_enable_scaled_pos_embed if sd3_checkbox else None
         ),
-        "logit_mean": logit_mean if sd3_checkbox else None,
-        "logit_std": logit_std if sd3_checkbox else None,
+        "logit_mean": (
+            float(moss_logit_mean)
+            if moss_image_checkbox
+            else logit_mean if sd3_checkbox else None
+        ),
+        "logit_std": (
+            float(moss_logit_std)
+            if moss_image_checkbox
+            else logit_std if sd3_checkbox else None
+        ),
         "mode_scale": mode_scale if sd3_checkbox else None,
         "pos_emb_random_crop_rate": pos_emb_random_crop_rate if sd3_checkbox else None,
         "save_clip": save_clip if sd3_checkbox else None,
@@ -2407,35 +2656,56 @@ def train_model(
             or hunyuan_image_checkbox
             or anima_checkbox
             or lumina_checkbox
+            or moss_image_checkbox
             else None
         ),
         "single_blocks_to_swap": single_blocks_to_swap if flux1_checkbox else None,
         "double_blocks_to_swap": double_blocks_to_swap if flux1_checkbox else None,
         "show_timesteps": (
             show_timesteps
-            if (flux1_checkbox or sd3_checkbox or anima_checkbox or lumina_checkbox)
+            if (
+                flux1_checkbox
+                or sd3_checkbox
+                or anima_checkbox
+                or lumina_checkbox
+                or moss_image_checkbox
+            )
             and show_timesteps
             else None
         ),
         "show_timesteps_resolution": (
             show_timesteps_resolution
-            if (flux1_checkbox or sd3_checkbox or anima_checkbox or lumina_checkbox)
+            if (
+                flux1_checkbox
+                or sd3_checkbox
+                or anima_checkbox
+                or lumina_checkbox
+                or moss_image_checkbox
+            )
             and show_timesteps
             else None
         ),
         # HunyuanImage-2.1 specific parameters
-        "text_encoder": hunyuan_text_encoder if hunyuan_image_checkbox else None,
+        "text_encoder": (
+            moss_text_encoder
+            if moss_image_checkbox
+            else hunyuan_text_encoder if hunyuan_image_checkbox else None
+        ),
         "byt5": hunyuan_byt5 if hunyuan_image_checkbox else None,
         "discrete_flow_shift": (
-            float(lumina_discrete_flow_shift)
-            if lumina_checkbox
+            float(moss_discrete_flow_shift)
+            if moss_image_checkbox
             else (
-                float(anima_discrete_flow_shift)
-                if anima_checkbox
+                float(lumina_discrete_flow_shift)
+                if lumina_checkbox
                 else (
-                    float(hunyuan_discrete_flow_shift)
-                    if hunyuan_image_checkbox
-                    else float(discrete_flow_shift) if flux1_checkbox else None
+                    float(anima_discrete_flow_shift)
+                    if anima_checkbox
+                    else (
+                        float(hunyuan_discrete_flow_shift)
+                        if hunyuan_image_checkbox
+                        else float(discrete_flow_shift) if flux1_checkbox else None
+                    )
                 )
             )
         ),
@@ -2449,36 +2719,54 @@ def train_model(
             )
         ),
         "timestep_sampling": (
-            lumina_timestep_sampling
-            if lumina_checkbox
+            moss_timestep_sampling
+            if moss_image_checkbox
             else (
-                anima_timestep_sampling
-                if anima_checkbox
+                lumina_timestep_sampling
+                if lumina_checkbox
                 else (
-                    hunyuan_timestep_sampling
-                    if hunyuan_image_checkbox
-                    else timestep_sampling if flux1_checkbox else None
+                    anima_timestep_sampling
+                    if anima_checkbox
+                    else (
+                        hunyuan_timestep_sampling
+                        if hunyuan_image_checkbox
+                        else timestep_sampling if flux1_checkbox else None
+                    )
                 )
             )
         ),
         "sigmoid_scale": (
-            float(lumina_sigmoid_scale)
-            if lumina_checkbox
+            float(moss_sigmoid_scale)
+            if moss_image_checkbox
             else (
-                float(anima_sigmoid_scale)
-                if anima_checkbox
-                else float(hunyuan_sigmoid_scale) if hunyuan_image_checkbox else None
+                float(lumina_sigmoid_scale)
+                if lumina_checkbox
+                else (
+                    float(anima_sigmoid_scale)
+                    if anima_checkbox
+                    else (
+                        float(hunyuan_sigmoid_scale) if hunyuan_image_checkbox else None
+                    )
+                )
             )
         ),
         "attn_mode": (
-            anima_attn_mode
-            if anima_checkbox and anima_attn_mode != "torch"
-            else (hunyuan_attn_mode if hunyuan_image_checkbox else None)
+            (moss_attn_mode or "torch")
+            if moss_image_checkbox
+            else (
+                anima_attn_mode
+                if anima_checkbox and anima_attn_mode != "torch"
+                else (hunyuan_attn_mode if hunyuan_image_checkbox else None)
+            )
         ),
         "split_attn": (
-            anima_split_attn
-            if anima_checkbox
-            else hunyuan_split_attn if hunyuan_image_checkbox else None
+            moss_split_attn
+            if moss_image_checkbox
+            else (
+                anima_split_attn
+                if anima_checkbox
+                else hunyuan_split_attn if hunyuan_image_checkbox else None
+            )
         ),
         "fp8_scaled": hunyuan_fp8_scaled if hunyuan_image_checkbox else None,
         "fp8_vl": hunyuan_fp8_vl if hunyuan_image_checkbox else None,
@@ -2526,13 +2814,19 @@ def train_model(
         ),
         "vae_disable_cache": anima_vae_disable_cache if anima_checkbox else None,
         "unsloth_offload_checkpointing": (
-            anima_unsloth_offload_checkpointing if anima_checkbox else None
+            moss_unsloth_offload_checkpointing
+            if moss_image_checkbox
+            else anima_unsloth_offload_checkpointing if anima_checkbox else None
         ),
         "qwen_image_vae_2d": (anima_qwen_image_vae_2d if anima_checkbox else None),
         # `--compile` (per-block) and `--torch_compile` (accelerate dynamo) are
         # mutually exclusive at the backend; the GUI already prevents both
         # checkboxes from being enabled together (see class_anima.py).
-        "compile": anima_compile if anima_checkbox else None,
+        "compile": (
+            moss_compile
+            if moss_image_checkbox
+            else anima_compile if anima_checkbox else None
+        ),
         "torch_compile": anima_torch_compile if anima_checkbox else None,
         "compile_backend": (
             anima_compile_backend if anima_checkbox and anima_compile else None
@@ -2553,6 +2847,50 @@ def train_model(
             if anima_checkbox and anima_compile and anima_compile_cache_size_limit
             else None
         ),
+        # MOSS-Image specific parameters
+        # ("text_encoder", "vae", "discrete_flow_shift", "timestep_sampling",
+        # "sigmoid_scale", "logit_mean", "logit_std", "attn_mode", "split_attn",
+        # "unsloth_offload_checkpointing", "compile": see assignments above)
+        # Reuse an already-downloaded tokenizer so the backend skips the Hub.
+        "tokenizer_cache_dir": (
+            resolve_moss_tokenizer_dir(moss_tokenizer_cache_dir) or None
+            if moss_image_checkbox
+            else None
+        ),
+        "moss_max_token_length": (
+            int(moss_max_token_length)
+            if moss_image_checkbox and moss_max_token_length
+            else None
+        ),
+        "timestep_cutoff": (
+            float(moss_timestep_cutoff)
+            if moss_image_checkbox
+            and moss_timestep_sampling == "truncated_logit_normal"
+            else None
+        ),
+        "timestep_uniform_ratio": (
+            float(moss_timestep_uniform_ratio)
+            if moss_image_checkbox
+            and moss_timestep_sampling == "truncated_logit_normal"
+            else None
+        ),
+        "convrot_int8": moss_convrot_int8 if moss_image_checkbox else None,
+        "convrot_int8_text_encoder": (
+            moss_convrot_int8_text_encoder if moss_image_checkbox else None
+        ),
+        "convrot_int8_bwd": (
+            moss_convrot_int8_bwd
+            if moss_image_checkbox and moss_convrot_int8_bwd != "bf16"
+            else None
+        ),
+        "block_swap_h2d_only": (
+            moss_block_swap_h2d_only
+            if moss_image_checkbox and blocks_to_swap and int(blocks_to_swap) > 0
+            else None
+        ),
+        "enable_multiline_caption": (
+            moss_enable_multiline_caption if moss_image_checkbox else None
+        ),
     }
 
     # Given dictionary `config_toml_data`
@@ -2566,6 +2904,13 @@ def train_model(
     }
 
     config_toml_data["max_data_loader_n_workers"] = int(max_data_loader_n_workers)
+
+    # MOSS-Image: an empty skip-layer list disables the official CFG layer skip,
+    # but the filter above drops "" (backend default "22" would then apply).
+    if moss_image_checkbox:
+        config_toml_data["sample_uncond_skip_layers"] = str(
+            moss_sample_uncond_skip_layers or ""
+        ).strip()
 
     # Chroma backend contract (flux_train_network.py):
     # - apply_t5_attn_mask is hard-required (assert)
@@ -2729,6 +3074,7 @@ def lora_tab(
                             "Kohya LoKr",
                             "LoRA-FA",
                             "Lumina",
+                            "MOSS-Image",
                             "LyCORIS/iA3",
                             "LyCORIS/BOFT",
                             "LyCORIS/Diag-OFT",
@@ -3060,6 +3406,7 @@ def lora_tab(
                                     "Flux1",
                                     "Flux1 OFT",
                                     "HunyuanImage-2.1",
+                                    "MOSS-Image",
                                     "Kohya DyLoRA",
                                     "Kohya LoCon",
                                     "Kohya LoHa",
@@ -3122,6 +3469,7 @@ def lora_tab(
                                     "Flux1",
                                     "Flux1 OFT",
                                     "HunyuanImage-2.1",
+                                    "MOSS-Image",
                                     "Standard",
                                     "LoCon",
                                     "Kohya DyLoRA",
@@ -3148,6 +3496,7 @@ def lora_tab(
                                     "Flux1",
                                     "Flux1 OFT",
                                     "HunyuanImage-2.1",
+                                    "MOSS-Image",
                                     "Standard",
                                     "LoCon",
                                     "Kohya DyLoRA",
@@ -3174,6 +3523,7 @@ def lora_tab(
                                     "Flux1",
                                     "Flux1 OFT",
                                     "HunyuanImage-2.1",
+                                    "MOSS-Image",
                                     "Standard",
                                     "LoCon",
                                     "Kohya DyLoRA",
@@ -3488,6 +3838,13 @@ def lora_tab(
                 headless=headless,
                 config=config,
                 lumina_checkbox=source_model.lumina_checkbox,
+            )
+
+            # Add MOSS-Image Parameters
+            moss_image_training = mossImageTraining(
+                headless=headless,
+                config=config,
+                moss_image_checkbox=source_model.moss_image_checkbox,
             )
 
             with gr.Accordion(
@@ -3971,6 +4328,49 @@ def lora_tab(
             ("lumina_use_flash_attn", lumina_training.use_flash_attn),
             ("lumina_use_sage_attn", lumina_training.use_sage_attn),
             ("lumina_checkbox", source_model.lumina_checkbox),
+            ("moss_text_encoder", moss_image_training.text_encoder),
+            ("moss_vae", moss_image_training.vae),
+            ("moss_tokenizer_cache_dir", moss_image_training.tokenizer_cache_dir),
+            ("moss_max_token_length", moss_image_training.max_token_length),
+            ("moss_timestep_sampling", moss_image_training.timestep_sampling),
+            ("moss_discrete_flow_shift", moss_image_training.discrete_flow_shift),
+            ("moss_sigmoid_scale", moss_image_training.sigmoid_scale),
+            ("moss_logit_mean", moss_image_training.logit_mean),
+            ("moss_logit_std", moss_image_training.logit_std),
+            ("moss_timestep_cutoff", moss_image_training.timestep_cutoff),
+            ("moss_timestep_uniform_ratio", moss_image_training.timestep_uniform_ratio),
+            ("moss_attn_mode", moss_image_training.attn_mode),
+            ("moss_split_attn", moss_image_training.split_attn),
+            (
+                "moss_sample_uncond_skip_layers",
+                moss_image_training.sample_uncond_skip_layers,
+            ),
+            ("moss_convrot_int8", moss_image_training.convrot_int8),
+            (
+                "moss_convrot_int8_text_encoder",
+                moss_image_training.convrot_int8_text_encoder,
+            ),
+            ("moss_convrot_int8_bwd", moss_image_training.convrot_int8_bwd),
+            ("moss_block_swap_h2d_only", moss_image_training.block_swap_h2d_only),
+            (
+                "moss_unsloth_offload_checkpointing",
+                moss_image_training.unsloth_offload_checkpointing,
+            ),
+            ("moss_compile", moss_image_training.compile),
+            (
+                "moss_enable_multiline_caption",
+                moss_image_training.enable_multiline_caption,
+            ),
+            ("moss_train_text_embedder", moss_image_training.train_text_embedder),
+            (
+                "moss_cache_text_encoder_outputs",
+                moss_image_training.cache_text_encoder_outputs,
+            ),
+            (
+                "moss_cache_text_encoder_outputs_to_disk",
+                moss_image_training.cache_text_encoder_outputs_to_disk,
+            ),
+            ("moss_image_checkbox", source_model.moss_image_checkbox),
         ]
         settings_list = [comp for _, comp in FIELD_REGISTRY]
 

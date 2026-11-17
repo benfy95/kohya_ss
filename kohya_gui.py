@@ -27,7 +27,10 @@ from kohya_gui.custom_logging import setup_logging
 from kohya_gui.common_gui import (
     HEADLESS_RECOMMENDATION_MESSAGE,
     should_recommend_headless,
+    suppress_known_dependency_warnings,
 )
+
+suppress_known_dependency_warnings()
 from kohya_gui.localization_ext import add_javascript
 from kohya_gui.offline_assets import (
     build_offline_theme,
