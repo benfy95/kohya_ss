@@ -51,10 +51,6 @@ class BasicTraining:
         self.dreambooth = dreambooth
         self.config = config
 
-        # Initialize old_lr_warmup and old_lr_warmup_steps with default values
-        self.old_lr_warmup = 0
-        self.old_lr_warmup_steps = 0
-
         # Initialize the UI components
         self.initialize_ui_components()
 
@@ -321,25 +317,17 @@ class BasicTraining:
 
             def lr_scheduler_changed(scheduler, value, value_lr_warmup_steps):
                 if scheduler == "constant":
-                    self.old_lr_warmup = value
-                    self.old_lr_warmup_steps = value_lr_warmup_steps
-                    value = 0
-                    value_lr_warmup_steps = 0
-                    interactive = False
                     info = "Can't use LR warmup with LR Scheduler constant... setting to 0 and disabling field..."
-                else:
-                    if self.old_lr_warmup != 0:
-                        value = self.old_lr_warmup
-                        self.old_lr_warmup = 0
-                    if self.old_lr_warmup_steps != 0:
-                        value_lr_warmup_steps = self.old_lr_warmup_steps
-                        self.old_lr_warmup_steps = 0
-                    interactive = True
-                    info = ""
-                return gr.Slider(
-                    value=value, interactive=interactive, info=info
-                ), gr.Number(
-                    value=value_lr_warmup_steps, interactive=interactive, info=info
+                    return gr.Slider(value=0, interactive=False, info=info), gr.Number(
+                        value=0, interactive=False, info=info
+                    )
+                # Any other scheduler: re-enable the fields but never send a
+                # value. Loading a config changes the scheduler and the warmup
+                # in one update, and this handler would read the stale
+                # on-screen warmup; writing it (or a remembered older value)
+                # back would undo the loaded config's warmup.
+                return gr.Slider(interactive=True, info=""), gr.Number(
+                    interactive=True, info=""
                 )
 
             self.lr_scheduler.change(

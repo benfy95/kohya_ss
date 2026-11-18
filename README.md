@@ -477,6 +477,10 @@ Only the upcoming release is detailed here. For the full history of published re
 - Training console output: colours, full-width one-line progress bars, timestamps on every line, visible
   checkpoint-save messages, and stop/end messages on their own line.
 - Repeated Starlette `HTTP_422_UNPROCESSABLE_ENTITY` deprecation warning from Gradio is filtered.
+- Loaded configs now stick: GUI handlers no longer write stale on-screen values back over a freshly loaded
+  config. This reset Network Rank / Conv Rank (a config saved with rank 32 trained at 8), LR warmup, and
+  v-parameterization whenever the loaded LoRA type or scheduler differed from the one on screen (e.g. right
+  after starting the GUI). Verified by a load -> save round-trip with all 312 settings unchanged.
 
 ### v26.0.0
 

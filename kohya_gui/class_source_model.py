@@ -346,8 +346,11 @@ class SourceModel:
                                     # If all unchecked, return new interactive checkboxes
                                     return (
                                         gr.Checkbox(interactive=True),  # v2 checkbox
+                                        # Interactivity only: setting value=False
+                                        # here could untick a v_parameterization
+                                        # a config just loaded (stale read).
                                         gr.Checkbox(
-                                            interactive=False, value=False
+                                            interactive=False
                                         ),  # v_parameterization checkbox
                                         gr.Checkbox(interactive=True),  # sdxl_checkbox
                                         gr.Checkbox(interactive=True),  # sd3_checkbox

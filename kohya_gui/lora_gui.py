@@ -3438,6 +3438,12 @@ def lora_tab(
 
                     regularizer_vis = regularizer_controls_visible(LoRA_type)
 
+                    # Only adjust the rank sliders' maximum here; never write
+                    # their value back. Loading a config changes LoRA_type and
+                    # network_dim/conv_dim in one update, and this handler then
+                    # reads the stale on-screen ranks, so echoing them as
+                    # "value" reset a loaded rank (e.g. 32) to the old one (8).
+
                     lora_settings_config = {
                         "network_row": {
                             "gr_type": gr.Row,
@@ -3607,7 +3613,6 @@ def lora_tab(
                                     }
                                     else 512
                                 ),
-                                "value": conv_dim,  # if conv_dim > 512 else conv_dim,
                             },
                         },
                         "network_dim": {
@@ -3624,7 +3629,6 @@ def lora_tab(
                                     }
                                     else 512
                                 ),
-                                "value": network_dim,  # if network_dim > 512 else network_dim,
                             },
                         },
                         "bypass_mode": {
