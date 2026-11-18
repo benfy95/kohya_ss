@@ -48,6 +48,7 @@ class SourceModel:
         headless=False,
         finetuning=False,
         config: KohyaSSGUIConfig = {},
+        show_comfy_conversion: bool = False,
     ):
         self.headless = headless
         self.save_model_as_choices = save_model_as_choices
@@ -480,6 +481,32 @@ class SourceModel:
                         label="Save precision",
                         value=self.config.get("model.save_precision", "fp16"),
                     )
+                    # LoRA tab only: Anima / HunyuanImage LoRAs need a key
+                    # conversion before ComfyUI can load them fully (see
+                    # comfy_lora_convert.py). Hidden for other model types.
+                    self.convert_lora_to_comfy = gr.Checkbox(
+                        label="Save in ComfyUI format",
+                        value=self.config.get("model.convert_lora_to_comfy", False),
+                        info="After training, convert each saved LoRA to ComfyUI format in place (same file name). Anima / HunyuanImage-2.1, LoRA type only",
+                        visible=False,
+                        interactive=True,
+                    )
+                    if show_comfy_conversion:
+                        for model_checkbox in (
+                            self.anima_checkbox,
+                            self.hunyuan_image_checkbox,
+                        ):
+                            model_checkbox.change(
+                                fn=lambda anima, hunyuan: gr.Checkbox(
+                                    visible=bool(anima or hunyuan)
+                                ),
+                                inputs=[
+                                    self.anima_checkbox,
+                                    self.hunyuan_image_checkbox,
+                                ],
+                                outputs=[self.convert_lora_to_comfy],
+                                show_progress=False,
+                            )
 
                 self.pretrained_model_name_or_path.change(
                     fn=lambda path: set_pretrained_model_name_or_path_input(

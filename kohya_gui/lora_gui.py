@@ -52,6 +52,7 @@ from .class_flux1 import flux1Training
 from .class_hunyuan_image import hunyuanImageTraining
 from .class_anima import animaTraining
 from .class_lumina import luminaTraining
+from .comfy_lora_convert import comfy_converter_for, convert_run_outputs
 from .class_moss_image import (
     mossImageTraining,
     MOSS_MAX_BLOCKS_TO_SWAP,
@@ -434,6 +435,7 @@ def save_configuration(
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
     moss_image_checkbox,
+    convert_lora_to_comfy,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -807,6 +809,7 @@ def open_configuration(
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
     moss_image_checkbox,
+    convert_lora_to_comfy,
     ##
     training_preset,
 ):
@@ -1149,6 +1152,33 @@ def append_rank_module_dropout_network_args(
     if module_dropout is not None and float(module_dropout) > 0:
         network_args += f" module_dropout={module_dropout}"
     return network_args
+
+
+def build_comfy_conversion_step(
+    *, enabled, lora_type, save_model_as, output_dir, output_name, since=None
+):
+    """Return the post-training ComfyUI conversion callable, or None.
+
+    Conversion runs only when the checkbox is on, the LoRA type has a
+    converter in sd-scripts/networks, and files are saved as safetensors.
+    ``since`` (default: now) limits it to the files written by this run.
+    """
+    if not enabled:
+        return None
+    if comfy_converter_for(lora_type) is None:
+        log.warning(
+            f"'Save in ComfyUI format' is on, but LoRA type '{lora_type}' has no "
+            "ComfyUI converter; skipping conversion."
+        )
+        return None
+    if save_model_as != "safetensors":
+        log.warning(
+            "'Save in ComfyUI format' needs 'Save trained model as' = "
+            "safetensors; skipping conversion."
+        )
+        return None
+    since = time.time() if since is None else since
+    return lambda: convert_run_outputs(lora_type, output_dir, output_name, since)
 
 
 def validate_moss_image_settings(
@@ -1597,6 +1627,7 @@ def train_model(
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
     moss_image_checkbox,
+    convert_lora_to_comfy,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -2961,7 +2992,17 @@ def train_model(
 
         # Run the command
 
-        executor.execute_command(run_cmd=run_cmd, env=env)
+        executor.execute_command(
+            run_cmd=run_cmd,
+            env=env,
+            on_finish=build_comfy_conversion_step(
+                enabled=convert_lora_to_comfy,
+                lora_type=LoRA_type,
+                save_model_as=save_model_as,
+                output_dir=output_dir,
+                output_name=output_name,
+            ),
+        )
 
         train_state_value = time.time()
 
@@ -3008,6 +3049,7 @@ def lora_tab(
                 ],
                 headless=headless,
                 config=config,
+                show_comfy_conversion=True,
             )
 
             with gr.Accordion("Folders", open=True), gr.Group():
@@ -4371,6 +4413,7 @@ def lora_tab(
                 moss_image_training.cache_text_encoder_outputs_to_disk,
             ),
             ("moss_image_checkbox", source_model.moss_image_checkbox),
+            ("convert_lora_to_comfy", source_model.convert_lora_to_comfy),
         ]
         settings_list = [comp for _, comp in FIELD_REGISTRY]
 

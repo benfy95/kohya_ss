@@ -39,6 +39,10 @@ models supported by sd-scripts can be trained from the GUI.
   "saving checkpoint: …" messages shown as each epoch is saved.
 - **BLIP captioning fixed for transformers 5:** the BLIP tab now uses transformers' own BLIP-large captioning model
   (`Salesforce/blip-image-captioning-large`) instead of sd-scripts' legacy BLIP code, which no longer runs.
+- **Optional ComfyUI format:** for Anima and HunyuanImage-2.1 LoRAs, tick *Save in ComfyUI format* (next to
+  *Save precision*) to convert every saved LoRA to ComfyUI format after training, keeping the same file names
+  (uses sd-scripts' own converters; the sd-scripts-format version is replaced).
+  MOSS-Image LoRAs, and Anima LoRAs that don't train the text encoder, already load in ComfyUI as saved.
 - All existing model types (SD 1.5/2.x, SDXL, SD3, Flux.1, Lumina, Anima, HunyuanImage-2.1) were re-checked
   against the new backend.
 
@@ -462,6 +466,7 @@ Only the upcoming release is detailed here. For the full history of published re
 **Added**
 - MOSS-Image LoRA training (sd-scripts `moss_image_train_network.py`, `networks.lora_generic`), including ConvRot
   INT8, H2D-only block swap and Kohya LoHa/LoKr support.
+- "Save in ComfyUI format" option for Anima / HunyuanImage-2.1 LoRAs (converts every saved file in place after training).
 
 **Changed**
 - sd-scripts backend v0.11.1 → v0.12.3; `transformers` 5.17.0, `diffusers` 0.40.0, `huggingface-hub` 1.32.0,

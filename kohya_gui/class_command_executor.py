@@ -195,6 +195,8 @@ class CommandExecutor:
         self._tee_thread: Optional[threading.Thread] = None
         # Whether teed output left the console cursor mid-line (open bar).
         self._console_state = {"mid_line": False}
+        # Optional callable run after a successful or user-stopped run.
+        self._on_finish = None
 
         with gr.Row():
             self.button_run = gr.Button("Start training", variant="primary")
@@ -205,12 +207,15 @@ class CommandExecutor:
                 variant="stop",
             )
 
-    def execute_command(self, run_cmd: str, **kwargs):
+    def execute_command(self, run_cmd: str, on_finish=None, **kwargs):
         """
         Execute a command if no other command is currently running.
 
         Parameters:
         - run_cmd (str): The command to execute.
+        - on_finish (callable, optional): called with no arguments once the
+          command ends successfully or is stopped by the user (e.g. to
+          post-process the files it saved). Not called on failure.
         - **kwargs: Additional keyword arguments to pass to subprocess.Popen.
         """
         if self.process and self.process.poll() is None:
@@ -224,6 +229,7 @@ class CommandExecutor:
             self._output_lines = collections.deque(maxlen=_DEFAULT_LOG_TAIL_LINES)
             self._tee_thread = None
             self._console_state = {"mid_line": False}
+            self._on_finish = on_finish
 
             # Tee child stdout/stderr into a ring buffer (and the console) so
             # failure summaries can include a traceback tail. Skip if the
@@ -337,6 +343,13 @@ class CommandExecutor:
             output_message(msg=message, title="Training failed", headless=self.headless)
         else:
             log.info(message)
+
+        on_finish, self._on_finish = self._on_finish, None
+        if on_finish is not None and (returncode == 0 or self._stopped_by_user):
+            try:
+                on_finish()
+            except Exception as e:  # post-processing must not break the UI
+                log.error(f"Post-training step failed: {e}")
 
         return gr.Button(visible=True), gr.Button(visible=False or self.headless)
 
