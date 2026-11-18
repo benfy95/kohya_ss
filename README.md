@@ -129,6 +129,11 @@ install.
 > If you are switching an existing *original* kohya_ss install to this build, re-run the installer: the backend
 > needs the newer `transformers` 5 / `diffusers` 0.40 packages.
 
+> **Update uv first** (`uv self update`, or `winget upgrade astral-sh.uv` if you installed it with winget). Old uv
+> versions (seen with 0.7.21) leave half-removed package records behind when upgrading, which made training fail
+> with `TypeError: expected string or bytes-like object, got 'NoneType'` (Python reports no version for
+> `transformers`). The GUI now removes these leftovers automatically at startup and prints what it removed.
+
 ### Contributors
 
 - **[benfy95](https://github.com/benfy95)**: maintainer of this build, testing and MOSS-Image training validation
@@ -477,6 +482,9 @@ Only the upcoming release is detailed here. For the full history of published re
 - Training console output: colours, full-width one-line progress bars, timestamps on every line, visible
   checkpoint-save messages, and stop/end messages on their own line.
 - Repeated Starlette `HTTP_422_UNPROCESSABLE_ENTITY` deprecation warning from Gradio is filtered.
+- Updating an existing install with an old uv could leave half-removed `*.dist-info` folders that made
+  `importlib.metadata` report no version for `transformers`, crashing training at `import diffusers`. The GUI
+  removes these leftovers at startup.
 - Loaded configs now stick: GUI handlers no longer write stale on-screen values back over a freshly loaded
   config. This reset Network Rank / Conv Rank (a config saved with rank 32 trained at 8), LR warmup, and
   v-parameterization whenever the loaded LoRA type or scheduler differed from the one on screen (e.g. right

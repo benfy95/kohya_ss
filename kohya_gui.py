@@ -11,6 +11,13 @@ import contextlib
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 
+# Before any third-party import: remove package records left half-deleted by
+# old uv versions, which make importlib.metadata report no version (e.g. for
+# transformers) and crash training. See kohya_gui/env_repair.py.
+from kohya_gui.env_repair import repair_environment
+
+repair_environment()
+
 import gradio as gr
 
 from kohya_gui.class_gui_config import KohyaSSGUIConfig
