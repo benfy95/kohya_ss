@@ -155,13 +155,15 @@ class SourceModel:
                             show_progress=False,
                         )
 
-                    with gr.Column(), gr.Row():
-                        self.output_name = gr.Textbox(
-                            label="Trained Model output name",
-                            placeholder="(Name of the model to output)",
-                            value=self.config.get("model.output_name", "last"),
-                            interactive=True,
-                        )
+                # Own full-width row: long model paths no longer get squeezed
+                # into half a row (horizontal scroll bar) next to the name.
+                with gr.Row(), gr.Column(), gr.Row():
+                    self.output_name = gr.Textbox(
+                        label="Trained Model output name",
+                        placeholder="(Name of the model to output)",
+                        value=self.config.get("model.output_name", "last"),
+                        interactive=True,
+                    )
                 with gr.Row():
                     with gr.Column(), gr.Row():
                         self.train_data_dir = gr.Dropdown(
@@ -462,8 +464,9 @@ class SourceModel:
                                 outputs=checkbox_inputs,
                                 show_progress=False,
                             )
-                    with gr.Column():
-                        gr.Group(visible=False)
+                    # (No empty placeholder column here: it took the right half
+                    # of the row and squeezed the model-type checkboxes, cutting
+                    # off "HunyuanImage-2.1" behind a scroll bar.)
 
                 with gr.Row():
                     self.training_comment = gr.Textbox(
