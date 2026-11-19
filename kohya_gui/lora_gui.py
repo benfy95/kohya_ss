@@ -7,6 +7,8 @@ import toml
 
 from datetime import datetime
 from .common_gui import (
+    field_defaults_from_registry,
+    loaded_field_value,
     check_if_model_exist,
     color_aug_changed,
     get_any_file_path,
@@ -82,6 +84,9 @@ train_state_value = time.time()
 # open_configuration's shared keyword-argument order. Exposed at module level
 # so tests can assert it stays in sync without rebuilding the whole GUI.
 last_built_field_registry = None
+# Field defaults captured when the tab is built; used when a loaded
+# config file lacks a field (see common_gui.loaded_field_value).
+FIELD_DEFAULTS: dict = {}
 
 # Populated by lora_tab() with the dict-keyed adapter callables wired to the
 # train/save/load/preset buttons (GH #3543 M2). Exposed at module level so
@@ -837,6 +842,7 @@ def open_configuration(
         file_path = get_file_path(file_path)
 
     # Proceed if the file path is valid (not empty or None)
+    loaded_from_file = False
     if not file_path == "" and not file_path == None:
         # Check if the file exists before opening it
         if not os.path.isfile(file_path):
@@ -846,6 +852,7 @@ def open_configuration(
         # Load variables from JSON file
         with open(file_path, "r", encoding="utf-8") as f:
             my_data = json.load(f)
+            loaded_from_file = True
             log.info("Loading config...")
 
             # Update values to fix deprecated options, set appropriate optimizer if it is set to True, etc.
@@ -861,7 +868,15 @@ def open_configuration(
         if not key in ["ask_for_file", "apply_preset", "file_path"]:
             json_value = my_data.get(key)
             # Append the value from JSON if present; otherwise, use the parameter's default value
-            values.append(json_value if json_value is not None else value)
+            values.append(
+                loaded_field_value(
+                    key,
+                    my_data,
+                    value,
+                    FIELD_DEFAULTS,
+                    loaded_from_file and not apply_preset,
+                )
+            )
 
     # Display LoCon parameters based on the 'LoRA_type' from the loaded data
     # This section dynamically adjusts visibility of certain parameters in the UI
@@ -4423,6 +4438,8 @@ def lora_tab(
 
         global last_built_field_registry
         last_built_field_registry = FIELD_REGISTRY
+        global FIELD_DEFAULTS
+        FIELD_DEFAULTS = field_defaults_from_registry(FIELD_REGISTRY)
 
         # GH #3543 M2: adapters at the Gradio boundary look up each argument by
         # component identity (via FIELD_REGISTRY) rather than by position, so a

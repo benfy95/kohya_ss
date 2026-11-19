@@ -177,6 +177,35 @@ def suppress_known_dependency_warnings() -> None:
         warnings.filterwarnings("ignore", message=message, category=category)
 
 
+def field_defaults_from_registry(field_registry) -> dict:
+    """``{field name: value the component was built with}`` for a tab.
+
+    Used by ``loaded_field_value``: those are the GUI defaults (including
+    config.toml overrides), captured once when the tab is built.
+    """
+    return {name: getattr(comp, "value", None) for name, comp in field_registry}
+
+
+def loaded_field_value(key, my_data, current, defaults, replace_missing):
+    """Value a field gets when a config file or preset is loaded.
+
+    The loaded data wins when it has the key. For a key the data does not
+    have (e.g. a setting added after the config was saved):
+
+    * ``replace_missing`` (loading a config file): use the field's default,
+      so nothing from the previously loaded config lingers (a MOSS-Image
+      tick stayed set after loading an older Anima config);
+    * otherwise (applying a preset, which only lists some fields on purpose):
+      keep the ``current`` on-screen value.
+    """
+    loaded = my_data.get(key)
+    if loaded is not None:
+        return loaded
+    if replace_missing and key in defaults:
+        return defaults[key]
+    return current
+
+
 HEADLESS_RECOMMENDATION_MESSAGE = (
     "No interactive display detected (or SSH session). "
     "Native dialogs (easygui/tkinter) can block the process. "

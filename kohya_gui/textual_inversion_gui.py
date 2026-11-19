@@ -6,6 +6,8 @@ import toml
 import time
 from datetime import datetime
 from .common_gui import (
+    field_defaults_from_registry,
+    loaded_field_value,
     check_if_model_exist,
     color_aug_changed,
     create_refresh_button,
@@ -67,6 +69,9 @@ train_state_value = time.time()
 # open_configuration's shared keyword-argument order. Exposed at module level
 # so tests can assert it stays in sync without rebuilding the whole GUI.
 last_built_field_registry = None
+# Field defaults captured when the tab is built; used when a loaded
+# config file lacks a field (see common_gui.loaded_field_value).
+FIELD_DEFAULTS: dict = {}
 
 # Populated by the tab builder with the dict-keyed adapter callables wired to
 # the train/save/load buttons (GH #3543 M3). Exposed at module level so tests
@@ -382,10 +387,12 @@ def open_configuration(
     if ask_for_file:
         file_path = get_file_path(file_path)
 
+    loaded_from_file = False
     if not file_path == "" and not file_path == None:
         # load variables from JSON file
         with open(file_path, "r", encoding="utf-8") as f:
             my_data = json.load(f)
+            loaded_from_file = True
             log.info("Loading config...")
             # Update values to fix deprecated use_8bit_adam checkbox and set appropriate optimizer if it is set to True
             my_data = update_my_data(my_data)
@@ -397,7 +404,11 @@ def open_configuration(
     for key, value in parameters:
         # Set the value in the dictionary to the corresponding value in `my_data`, or the default value if not found
         if not key in ["ask_for_file", "file_path"]:
-            values.append(my_data.get(key, value))
+            values.append(
+                loaded_field_value(
+                    key, my_data, value, FIELD_DEFAULTS, loaded_from_file
+                )
+            )
     return tuple(values)
 
 
@@ -1312,6 +1323,8 @@ def ti_tab(
 
         global last_built_field_registry
         last_built_field_registry = FIELD_REGISTRY
+        global FIELD_DEFAULTS
+        FIELD_DEFAULTS = field_defaults_from_registry(FIELD_REGISTRY)
 
         # GH #3543 M3: adapters at the Gradio boundary look up each argument by
         # component identity (via FIELD_REGISTRY) rather than by position, so a

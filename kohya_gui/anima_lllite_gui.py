@@ -22,6 +22,8 @@ from .class_configuration_file import ConfigurationFile
 from .class_gui_config import KohyaSSGUIConfig
 from .class_source_model import default_models
 from .common_gui import (
+    field_defaults_from_registry,
+    loaded_field_value,
     SaveConfigFile,
     check_if_model_exist,
     create_refresh_button,
@@ -60,6 +62,9 @@ train_state_value = time.time()
 # settings_list, in the same order as train_model's/save_configuration's/
 # open_configuration's shared keyword-argument order.
 last_built_field_registry = None
+# Field defaults captured when the tab is built; used when a loaded
+# config file lacks a field (see common_gui.loaded_field_value).
+FIELD_DEFAULTS: dict = {}
 
 # Populated by anima_lllite_tab() with the dict-keyed adapter callables wired
 # to the train/save/load buttons (GH #3543 M3).
@@ -331,6 +336,7 @@ def open_configuration(
     if ask_for_file:
         file_path = get_file_path(file_path)
 
+    loaded_from_file = False
     if not file_path == "" and not file_path == None:
         if not os.path.isfile(file_path):
             log.error(f"Config file {file_path} does not exist.")
@@ -338,6 +344,7 @@ def open_configuration(
 
         with open(file_path, "r", encoding="utf-8") as f:
             my_data = json.load(f)
+            loaded_from_file = True
             log.info("Loading config...")
 
             my_data = update_my_data(my_data)
@@ -349,7 +356,11 @@ def open_configuration(
     for key, value in parameters:
         if not key in ["ask_for_file", "file_path"]:
             json_value = my_data.get(key)
-            values.append(json_value if json_value is not None else value)
+            values.append(
+                loaded_field_value(
+                    key, my_data, value, FIELD_DEFAULTS, loaded_from_file
+                )
+            )
 
     return tuple(values)
 
@@ -1540,6 +1551,8 @@ def anima_lllite_tab(
 
         global last_built_field_registry
         last_built_field_registry = FIELD_REGISTRY
+        global FIELD_DEFAULTS
+        FIELD_DEFAULTS = field_defaults_from_registry(FIELD_REGISTRY)
 
         def _kwargs_from_registry(data: dict) -> dict:
             return {name: data[comp] for name, comp in FIELD_REGISTRY}
