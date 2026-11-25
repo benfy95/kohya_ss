@@ -22,6 +22,7 @@ from .class_configuration_file import ConfigurationFile
 from .class_gui_config import KohyaSSGUIConfig
 from .class_source_model import default_models
 from .common_gui import (
+    gradient_checkpointing_skip_blocks_value,
     field_defaults_from_registry,
     loaded_field_value,
     SaveConfigFile,
@@ -140,6 +141,7 @@ def save_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     # lllite section
     cond_emb_dim,
     lllite_mlp_dim,
@@ -273,6 +275,7 @@ def open_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     # lllite section
     cond_emb_dim,
     lllite_mlp_dim,
@@ -416,6 +419,7 @@ def train_model(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     # lllite section
     cond_emb_dim,
     lllite_mlp_dim,
@@ -667,6 +671,9 @@ def train_model(
             int(anima_compile_cache_size_limit)
             if anima_compile and anima_compile_cache_size_limit
             else None
+        ),
+        "gradient_checkpointing_skip_blocks": gradient_checkpointing_skip_blocks_value(
+            anima_gradient_checkpointing_skip_blocks, gradient_checkpointing
         ),
         # LLLite-specific (never emit unsupported MVP offload flags)
         "cond_emb_dim": int(cond_emb_dim),
@@ -1488,6 +1495,10 @@ def anima_lllite_tab(
             (
                 "anima_compile_cache_size_limit",
                 anima_training.compile_cache_size_limit,
+            ),
+            (
+                "anima_gradient_checkpointing_skip_blocks",
+                anima_training.gradient_checkpointing_skip_blocks,
             ),
             ("cond_emb_dim", cond_emb_dim),
             ("lllite_mlp_dim", lllite_mlp_dim),

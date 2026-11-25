@@ -13,6 +13,8 @@ from .common_gui import (
 # recommended by sd-scripts/docs/moss_image_train_network.md, section 7.2.
 MOSS_DEFAULT_MAX_TOKEN_LENGTH = 4096
 MOSS_MAX_BLOCKS_TO_SWAP = 40  # 42 DiT blocks - 2
+MOSS_DIT_BLOCKS = 42
+MOSS_TEXT_ENCODER_LAYERS = 32
 MOSS_TIMESTEP_SAMPLING_CHOICES = [
     "sigma",
     "uniform",
@@ -283,6 +285,37 @@ class mossImageTraining:
                         label="Per-block Torch Compile",
                         value=self.config.get("moss_image.compile", False),
                         info="--compile (requires triton)",
+                        interactive=True,
+                    )
+
+                with gr.Row():
+                    self.gradient_checkpointing_skip_blocks = gr.Number(
+                        label="Gradient Checkpointing Skip Blocks",
+                        value=self.config.get(
+                            "moss_image.gradient_checkpointing_skip_blocks", 0
+                        ),
+                        info="Last N of 42 DiT blocks keep their activations: ~1GB more VRAM and ~8.6ms faster per block. Needs Gradient checkpointing. 0 = off",
+                        minimum=0,
+                        maximum=MOSS_DIT_BLOCKS,
+                        step=1,
+                        interactive=True,
+                    )
+                    self.text_encoder_blocks_to_swap = gr.Number(
+                        label="Text Encoder Blocks to Swap",
+                        value=self.config.get(
+                            "moss_image.text_encoder_blocks_to_swap", 0
+                        ),
+                        info="Stream N of 32 text encoder layers from CPU while caching its outputs (28: ~5GB, 32: ~3.5GB peak). 0 = off",
+                        minimum=0,
+                        maximum=MOSS_TEXT_ENCODER_LAYERS,
+                        step=1,
+                        interactive=True,
+                    )
+                    self.replica_devices = gr.Textbox(
+                        label="Replica Devices (multi-GPU, experimental)",
+                        value=self.config.get("moss_image.replica_devices", ""),
+                        placeholder="e.g. 1 or cuda:1,cuda:2",
+                        info="Extra GPUs for the LoRA, no DDP needed (works on Windows). Requires Cache latents and Cache Text Encoder Outputs. Batch size is per GPU",
                         interactive=True,
                     )
 

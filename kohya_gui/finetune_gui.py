@@ -8,6 +8,7 @@ import sys
 import toml
 from datetime import datetime
 from .common_gui import (
+    gradient_checkpointing_skip_blocks_value,
     field_defaults_from_registry,
     loaded_field_value,
     check_if_model_exist,
@@ -296,6 +297,7 @@ def save_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     anima_checkbox,
     # Lumina Image 2.0
     lumina_cache_text_encoder_outputs,
@@ -555,6 +557,7 @@ def open_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     anima_checkbox,
     # Lumina Image 2.0
     lumina_cache_text_encoder_outputs,
@@ -830,6 +833,7 @@ def train_model(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
     anima_checkbox,
     # Lumina Image 2.0
     lumina_cache_text_encoder_outputs,
@@ -1436,6 +1440,10 @@ def train_model(
             if anima_checkbox and anima_compile and anima_compile_cache_size_limit
             else None
         ),
+        "gradient_checkpointing_skip_blocks": gradient_checkpointing_skip_blocks_value(
+            anima_gradient_checkpointing_skip_blocks if anima_checkbox else 0,
+            gradient_checkpointing,
+        ),
         # Lumina Image 2.0 specific parameters
         "gemma2": lumina_gemma2 if lumina_checkbox else None,
         "gemma2_max_token_length": (
@@ -1981,6 +1989,10 @@ def finetune_tab(
             (
                 "anima_compile_cache_size_limit",
                 anima_training.compile_cache_size_limit,
+            ),
+            (
+                "anima_gradient_checkpointing_skip_blocks",
+                anima_training.gradient_checkpointing_skip_blocks,
             ),
             ("anima_checkbox", source_model.anima_checkbox),
             (

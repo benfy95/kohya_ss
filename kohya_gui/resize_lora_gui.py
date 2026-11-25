@@ -33,6 +33,7 @@ def resize_lora(
     dynamic_param,
     verbose,
     svd_lowrank_niter,
+    svd_method="merged",
 ):
     # Check for caption_text_input
     if model == "":
@@ -87,7 +88,11 @@ def resize_lora(
         run_cmd.append("--dynamic_param")
         run_cmd.append(str(dynamic_param))
 
-    if svd_lowrank_niter is not None:
+    if svd_method and svd_method != "merged":
+        run_cmd.append("--svd_method")
+        run_cmd.append(svd_method)
+
+    if svd_lowrank_niter is not None and svd_method != "qr":
         run_cmd.append("--svd_lowrank_niter")
         run_cmd.append(str(int(svd_lowrank_niter)))
 
@@ -237,6 +242,13 @@ def gradio_resize_lora_tab(
                 interactive=True,
             )
         with gr.Row():
+            svd_method = gr.Radio(
+                label="SVD method",
+                choices=["merged", "qr"],
+                value="merged",
+                info="qr: exact SVD without merging the weights, much faster (100x+ on SDXL) and not random. merged: previous behavior",
+                interactive=True,
+            )
             svd_lowrank_niter = gr.Number(
                 label="SVD lowrank iterations",
                 info="Number of iterations for svd_lowrank on large matrices (>2048 dims). 0 to disable and use full SVD",
@@ -261,6 +273,7 @@ def gradio_resize_lora_tab(
                 dynamic_param,
                 verbose,
                 svd_lowrank_niter,
+                svd_method,
             ],
             show_progress=False,
         )

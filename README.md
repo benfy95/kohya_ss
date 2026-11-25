@@ -6,7 +6,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/bmaltais/kohya_ss)](https://github.com/bmaltais/kohya_ss/issues)
 
 > **This is a community build of [bmaltais/kohya_ss](https://github.com/bmaltais/kohya_ss)** that runs on the latest
-> [kohya-ss/sd-scripts](https://github.com/kohya-ss/sd-scripts) backend (**v0.12.3**) and adds
+> [kohya-ss/sd-scripts](https://github.com/kohya-ss/sd-scripts) backend (**v0.13.1**) and adds
 > **[MOSS-Image](https://github.com/OpenMOSS/MOSS-Image) LoRA training** to the GUI.
 > See [About this build](#about-this-build) for what changed and how to install it.
 
@@ -32,8 +32,22 @@ models supported by sd-scripts can be trained from the GUI.
 
 ### What's new
 
-- **Backend: sd-scripts v0.12.3** (from v0.11.1), with dependencies aligned to it: `transformers` 5.17.0,
+- **Backend: sd-scripts v0.13.1** (from v0.11.1), with dependencies aligned to it: `transformers` 5.17.0,
   `diffusers` 0.40.0, `huggingface-hub` 1.32.0, `safetensors` 0.8.0, `accelerate` ≥ 1.15.0.
+- **New in sd-scripts 0.13, available in the GUI:**
+  - **Run control** (LoRA tab, experimental): live status (step, loss, speed, ETA, VRAM) and buttons to
+    *Sample now*, *Save now*, *Save state*, *Pause* (frees VRAM), *Resume* and *Save & stop* a running training.
+    Also writes a per-image loss log (`tools/analyze_run_loss.py` finds images that don't learn well).
+  - **Gradient Checkpointing Skip Blocks** (Anima and MOSS-Image: LoRA, fine-tuning, LLLite): trades spare VRAM
+    for speed. MOSS-Image: about 1 GB more and 8.6 ms faster per block; Anima: 6.5 GB / 0.85 s per step up to
+    19.9 GB / 0.53 s per step with all 28 blocks.
+  - **Replica Devices** (Anima and MOSS-Image LoRA, experimental): multi-GPU training in one process, no DDP,
+    also on Windows. Needs cached latents, cached text encoder outputs and DiT-only training; the GUI checks these
+    and that *Accelerate launch → GPU IDs* doesn't hide the extra GPUs.
+  - **Text Encoder Blocks to Swap** (MOSS-Image): cache text encoder outputs on an 8 GB GPU.
+  - **Post-Hoc EMA** (LoRA → Tools): merge the last checkpoints of a training into one smoother LoRA.
+  - **Resize LoRA → SVD method `qr`**: exact and over 100× faster.
+  - Anima variants with a different number of blocks (e.g. Anima-2.9B) now load.
 - **MOSS-Image LoRA training** on the LoRA tab (details below).
 - **Readable training console:** colours, one-line full-width progress bars, a timestamp on every log line, and
   "saving checkpoint: …" messages shown as each epoch is saved.
@@ -465,6 +479,20 @@ This project is licensed under the Apache License 2.0. See the [LICENSE.md](LICE
 ## Change History
 
 Only the upcoming release is detailed here. For the full history of published releases, see [GitHub Releases](https://github.com/bmaltais/kohya_ss/releases).
+
+### benfy95 build (2026-11-25)
+
+**Changed**
+- sd-scripts backend v0.12.3 → v0.13.1 (no dependency changes).
+
+**Added**
+- Run control for LoRA training (`--run_control`): status panel and Sample / Save / Save state / Pause / Resume /
+  Save & stop buttons.
+- Gradient Checkpointing Skip Blocks for Anima (LoRA, fine-tuning, LLLite) and MOSS-Image.
+- Replica Devices (single-process multi-GPU LoRA) for Anima and MOSS-Image, with pre-launch checks.
+- Text Encoder Blocks to Swap for MOSS-Image.
+- LoRA → Tools → Post-Hoc EMA (`networks/lora_post_hoc_ema.py`).
+- Resize LoRA: SVD method (`merged` / `qr`).
 
 ### benfy95 build (2026-11-17)
 

@@ -206,6 +206,84 @@ def loaded_field_value(key, my_data, current, defaults, replace_missing):
     return current
 
 
+def gradient_checkpointing_skip_blocks_value(skip_blocks, gradient_checkpointing):
+    """--gradient_checkpointing_skip_blocks (sd-scripts 0.13, Anima / MOSS-Image) for the
+    training config, or None. It only has an effect with gradient checkpointing."""
+    try:
+        n = int(skip_blocks or 0)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    if not gradient_checkpointing:
+        log.warning(
+            "Gradient Checkpointing Skip Blocks is ignored: it needs Gradient checkpointing."
+        )
+        return None
+    return n
+
+
+def replica_devices_value(replica_devices):
+    """--replica_devices (sd-scripts 0.13) as a clean comma-separated list, or None."""
+    devices = [d.strip() for d in str(replica_devices or "").split(",") if d.strip()]
+    return ",".join(devices) or None
+
+
+def replica_device_indexes(replica_devices) -> list:
+    """CUDA indexes of a --replica_devices value ("1" / "cuda:1,cuda:2"); None for
+    entries that are not plain CUDA indexes."""
+    out = []
+    for d in str(replica_devices or "").split(","):
+        d = d.strip().lower()
+        if not d:
+            continue
+        d = d[len("cuda:") :] if d.startswith("cuda:") else d
+        out.append(int(d) if d.isdigit() else None)
+    return out
+
+
+def validate_replica_settings(
+    replica_devices,
+    *,
+    cache_latents: bool,
+    cache_text_encoder_outputs: bool,
+    train_unet_only: bool,
+    gpu_ids: str = "",
+) -> bool:
+    """Checks of single-process multi-GPU (replica) LoRA training before launch."""
+    if not replica_devices_value(replica_devices):
+        return True
+    ok = True
+    if not cache_latents:
+        log.error(
+            "Replica Devices (multi-GPU) needs Cache latents (Parameters > Basic)."
+        )
+        ok = False
+    if not cache_text_encoder_outputs:
+        log.error("Replica Devices (multi-GPU) needs Cache Text Encoder Outputs.")
+        ok = False
+    if not train_unet_only:
+        log.error(
+            "Replica Devices (multi-GPU) needs UNet/DiT-only training (Network train U-Net only)."
+        )
+        ok = False
+    indexes = replica_device_indexes(replica_devices)
+    if None in indexes:
+        log.error(
+            f"Replica Devices '{replica_devices}': use GPU numbers such as 1 or cuda:1,cuda:2."
+        )
+        ok = False
+    visible = [g for g in str(gpu_ids or "").split(",") if g.strip()]
+    if visible and indexes and None not in indexes and max(indexes) >= len(visible):
+        log.error(
+            f"Accelerate launch > GPU IDs is '{gpu_ids}', which hides the replica GPU(s) "
+            f"{replica_devices}. Clear GPU IDs, or list every GPU used (e.g. 0,1); "
+            "replica numbers count within that list."
+        )
+        ok = False
+    return ok
+
+
 HEADLESS_RECOMMENDATION_MESSAGE = (
     "No interactive display detected (or SSH session). "
     "Native dialogs (easygui/tkinter) can block the process. "

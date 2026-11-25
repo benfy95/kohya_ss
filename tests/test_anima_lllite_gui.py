@@ -69,6 +69,7 @@ def _default_kwargs(overrides=None):
         "anima_compile_dynamic": "auto",
         "anima_compile_fullgraph": False,
         "anima_compile_cache_size_limit": 0,
+        "anima_gradient_checkpointing_skip_blocks": 0,
         "cond_emb_dim": 32,
         "lllite_mlp_dim": 64,
         "lllite_target_layers": "self_attn_q",

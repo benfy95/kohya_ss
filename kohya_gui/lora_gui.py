@@ -7,6 +7,9 @@ import toml
 
 from datetime import datetime
 from .common_gui import (
+    gradient_checkpointing_skip_blocks_value,
+    replica_devices_value,
+    validate_replica_settings,
     field_defaults_from_registry,
     loaded_field_value,
     check_if_model_exist,
@@ -46,6 +49,7 @@ from .class_folders import Folders
 from .class_command_executor import CommandExecutor
 from .class_tensorboard import TensorboardManager
 from .class_sample_images import SampleImages, create_prompt_file
+from .class_run_control import RunControl
 from .class_lora_tab import LoRATools
 from .class_huggingface import HuggingFace
 from .class_metadata import MetaData
@@ -399,6 +403,8 @@ def save_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
+    anima_replica_devices,
     anima_checkbox,
     # Lumina Image 2.0 parameters
     lumina_cache_text_encoder_outputs,
@@ -439,8 +445,12 @@ def save_configuration(
     moss_train_text_embedder,
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
+    moss_gradient_checkpointing_skip_blocks,
+    moss_text_encoder_blocks_to_swap,
+    moss_replica_devices,
     moss_image_checkbox,
     convert_lora_to_comfy,
+    run_control,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -773,6 +783,8 @@ def open_configuration(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
+    anima_replica_devices,
     anima_checkbox,
     # Lumina Image 2.0 parameters
     lumina_cache_text_encoder_outputs,
@@ -813,8 +825,12 @@ def open_configuration(
     moss_train_text_embedder,
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
+    moss_gradient_checkpointing_skip_blocks,
+    moss_text_encoder_blocks_to_swap,
+    moss_replica_devices,
     moss_image_checkbox,
     convert_lora_to_comfy,
+    run_control,
     ##
     training_preset,
 ):
@@ -1601,6 +1617,8 @@ def train_model(
     anima_compile_dynamic,
     anima_compile_fullgraph,
     anima_compile_cache_size_limit,
+    anima_gradient_checkpointing_skip_blocks,
+    anima_replica_devices,
     anima_checkbox,
     # Lumina Image 2.0 parameters
     lumina_cache_text_encoder_outputs,
@@ -1641,8 +1659,12 @@ def train_model(
     moss_train_text_embedder,
     moss_cache_text_encoder_outputs,
     moss_cache_text_encoder_outputs_to_disk,
+    moss_gradient_checkpointing_skip_blocks,
+    moss_text_encoder_blocks_to_swap,
+    moss_replica_devices,
     moss_image_checkbox,
     convert_lora_to_comfy,
+    run_control,
 ):
     # Get list of function parameters and values
     parameters = list(locals().items())
@@ -2391,6 +2413,28 @@ def train_model(
         )
     )
 
+    # sd-scripts 0.13 single-process multi-GPU (replica) training: Anima / MOSS-Image.
+    replica_devices = (
+        moss_replica_devices
+        if moss_image_checkbox
+        else anima_replica_devices if anima_checkbox else ""
+    )
+    if not validate_replica_settings(
+        replica_devices,
+        cache_latents=bool(cache_latents or cache_latents_to_disk),
+        cache_text_encoder_outputs=bool(
+            (moss_cache_text_encoder_outputs or moss_cache_text_encoder_outputs_to_disk)
+            if moss_image_checkbox
+            else (
+                anima_cache_text_encoder_outputs
+                or anima_cache_text_encoder_outputs_to_disk
+            )
+        ),
+        train_unet_only=network_train_unet_only,
+        gpu_ids=gpu_ids,
+    ):
+        return TRAIN_BUTTON_VISIBLE
+
     # Chroma (flux_train_network --model_type=chroma) does not use CLIP-L.
     is_chroma = bool(flux1_checkbox) and str(model_type or "").lower() == "chroma"
 
@@ -2937,6 +2981,27 @@ def train_model(
         "enable_multiline_caption": (
             moss_enable_multiline_caption if moss_image_checkbox else None
         ),
+        "text_encoder_blocks_to_swap": (
+            int(moss_text_encoder_blocks_to_swap)
+            if moss_image_checkbox and moss_text_encoder_blocks_to_swap
+            else None
+        ),
+        # sd-scripts 0.13: Anima / MOSS-Image partial gradient checkpointing and
+        # single-process multi-GPU (replica) LoRA training
+        "gradient_checkpointing_skip_blocks": gradient_checkpointing_skip_blocks_value(
+            (
+                moss_gradient_checkpointing_skip_blocks
+                if moss_image_checkbox
+                else anima_gradient_checkpointing_skip_blocks if anima_checkbox else 0
+            ),
+            gradient_checkpointing,
+        ),
+        "replica_devices": replica_devices_value(
+            moss_replica_devices
+            if moss_image_checkbox
+            else anima_replica_devices if anima_checkbox else ""
+        ),
+        "run_control": run_control,
     }
 
     # Given dictionary `config_toml_data`
@@ -3892,6 +3957,7 @@ def lora_tab(
                 headless=headless,
                 config=config,
                 anima_checkbox=source_model.anima_checkbox,
+                show_replica_devices=True,
             )
 
             # Add Lumina Image 2.0 Parameters
@@ -3970,6 +4036,12 @@ def lora_tab(
 
             with gr.Accordion("Samples", open=False, elem_classes="samples_background"):
                 sample = SampleImages(config=config)
+
+            run_control = RunControl(
+                config=config,
+                output_dir=folders.output_dir,
+                output_name=source_model.output_name,
+            )
 
             global huggingface
             with gr.Accordion(
@@ -4363,6 +4435,11 @@ def lora_tab(
             ("anima_compile_dynamic", anima_training.compile_dynamic),
             ("anima_compile_fullgraph", anima_training.compile_fullgraph),
             ("anima_compile_cache_size_limit", anima_training.compile_cache_size_limit),
+            (
+                "anima_gradient_checkpointing_skip_blocks",
+                anima_training.gradient_checkpointing_skip_blocks,
+            ),
+            ("anima_replica_devices", anima_training.replica_devices),
             ("anima_checkbox", source_model.anima_checkbox),
             (
                 "lumina_cache_text_encoder_outputs",
@@ -4431,8 +4508,18 @@ def lora_tab(
                 "moss_cache_text_encoder_outputs_to_disk",
                 moss_image_training.cache_text_encoder_outputs_to_disk,
             ),
+            (
+                "moss_gradient_checkpointing_skip_blocks",
+                moss_image_training.gradient_checkpointing_skip_blocks,
+            ),
+            (
+                "moss_text_encoder_blocks_to_swap",
+                moss_image_training.text_encoder_blocks_to_swap,
+            ),
+            ("moss_replica_devices", moss_image_training.replica_devices),
             ("moss_image_checkbox", source_model.moss_image_checkbox),
             ("convert_lora_to_comfy", source_model.convert_lora_to_comfy),
+            ("run_control", run_control.run_control),
         ]
         settings_list = [comp for _, comp in FIELD_REGISTRY]
 

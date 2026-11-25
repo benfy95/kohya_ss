@@ -16,6 +16,7 @@ class animaTraining:
         anima_checkbox: gr.Checkbox = False,
         always_visible: bool = False,
         show_unsloth_offload_checkpointing: bool = True,
+        show_replica_devices: bool = False,
     ) -> None:
         self.headless = headless
         self.finetuning = finetuning
@@ -217,6 +218,28 @@ class animaTraining:
                         info="Offload activations to CPU RAM using async non-blocking transfers (faster than CPU Offload Checkpointing). Cannot be combined with CPU Offload Checkpointing or Blocks to swap.",
                         interactive=True,
                         visible=show_unsloth_offload_checkpointing,
+                    )
+
+                with gr.Row():
+                    self.gradient_checkpointing_skip_blocks = gr.Number(
+                        label="Gradient Checkpointing Skip Blocks",
+                        value=self.config.get(
+                            "anima.gradient_checkpointing_skip_blocks", 0
+                        ),
+                        info="Last N DiT blocks keep their activations: more VRAM, faster steps (28 blocks: 6.5GB/0.85s -> 19.9GB/0.53s). Needs Gradient checkpointing. 0 = off",
+                        minimum=0,
+                        maximum=64,
+                        step=1,
+                        interactive=True,
+                    )
+                    # Single-process multi-GPU LoRA training (LoRA tab only).
+                    self.replica_devices = gr.Textbox(
+                        label="Replica Devices (multi-GPU, experimental)",
+                        value=self.config.get("anima.replica_devices", ""),
+                        placeholder="e.g. 1 or cuda:1,cuda:2",
+                        info="Extra GPUs for the LoRA, no DDP needed (works on Windows). Requires Cache latents, Cache Text Encoder Outputs and UNet/DiT-only training. Batch size is per GPU",
+                        interactive=True,
+                        visible=show_replica_devices,
                     )
 
                 with gr.Row():
